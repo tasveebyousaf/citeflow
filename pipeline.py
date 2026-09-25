@@ -242,6 +242,7 @@ Style:
   (e.g. "microscope laboratory", "drone flying forest", "solar panels sunset"). No brand names, no specific real people,
   no computer screens, code, text or charts (they look fake as stock footage).
 
+{part_note}
 SOURCE DOCUMENT (numbered passages):
 {source}
 """
@@ -258,7 +259,7 @@ For each item return:
   NOT_A_CLAIM = no checkable factual content (hooks that only pose a question, greetings, placeholders, calls to action, hashtags, contact info).
 - evidence_ids: up to 3 passage ids (like P3-2). Empty only if nothing relevant exists.
 - issue_type: for EXAGGERATED/UNSUPPORTED a short label ("overgeneralisation", "causal overclaim", "removed limitation", "number mismatch", "not in source", "certainty inflation"); otherwise "".
-- explanation: one sentence citing what the source actually says.
+- explanation: for EXAGGERATED/UNSUPPORTED one short sentence citing what the source actually says; for SUPPORTED and NOT_A_CLAIM leave it "" (empty) to save time.
 - suggested_rewrite: for EXAGGERATED/UNSUPPORTED a faithful replacement in the same language and tone (or "" if it should be deleted); otherwise "".
 
 Be strict: when in doubt between SUPPORTED and EXAGGERATED, choose EXAGGERATED. In particular:
@@ -413,8 +414,31 @@ def list_flash_models(api_key: str) -> list[str]:
 
 # ---------------------------------------------------------------- steps
 
+class PartStory(BaseModel):
+    headline: str
+    subheadline: str
+    institution: str
+    card_title: str
+    press_release: str
+    visual: Visual
+
+
+class PartSocial(BaseModel):
+    posts: Posts
+    video_title: str
+    scenes: list[Scene]
+
+
 def generate_content(llm: LLM, passages, lang: str) -> Content:
-    return llm.json_call(GEN_PROMPT.format(lang=lang, source=passages_block(passages)), Content, 0.7)
+    """Writes the story (release + image text) and the social/video parts in two parallel calls."""
+    source = passages_block(passages)
+    note_a = "Return ONLY: headline, subheadline, institution, card_title, press_release and visual."
+    note_b = "Return ONLY: posts (linkedin, facebook, instagram, x), video_title and scenes."
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fa = ex.submit(llm.json_call, GEN_PROMPT.format(lang=lang, source=source, part_note=note_a), PartStory, 0.7)
+        fb = ex.submit(llm.json_call, GEN_PROMPT.format(lang=lang, source=source, part_note=note_b), PartSocial, 0.7)
+        a, b = fa.result(), fb.result()
+    return Content(**a.model_dump(), **b.model_dump())
 
 
 def revise_content(llm: LLM, passages, current: Content, feedback: str, target: str = "") -> Content:
@@ -521,13 +545,12 @@ def _verify_chunk(llm: LLM, source: str, items: list[dict]):
 def verify(llm: LLM, passages, items: list[dict]) -> list[dict]:
     """Checks items in parallel groups (release / posts / video) for speed."""
     source = passages_block(passages)
-    groups: dict[str, list[dict]] = {}
-    for it in items:
-        g = "release" if it["id"][0] in "HR" else "video" if it["id"][0] == "V" else "posts"
-        groups.setdefault(g, []).append(it)
+    n = max(1, min(5, (len(items) + 7) // 8))           # up to 5 small batches checked in parallel
+    size = (len(items) + n - 1) // n
+    groups = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
     verdicts = []
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        for part in ex.map(lambda g: _verify_chunk(llm, source, g), groups.values()):
+    with ThreadPoolExecutor(max_workers=len(groups)) as ex:
+        for part in ex.map(lambda g: _verify_chunk(llm, source, g) if g else [], groups):
             verdicts.extend(part)
     by_id = {v.item_id.strip("[] "): v for v in verdicts}
     pmap = {p.pid: p for p in passages}

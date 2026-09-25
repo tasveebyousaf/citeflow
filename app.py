@@ -1,6 +1,7 @@
 """CiteFlow — turn research into trusted PR content. Run: streamlit run app.py"""
 import base64
 import csv
+import hashlib
 import hmac
 import html
 import io
@@ -417,6 +418,24 @@ def visual_now():
     return pl.safe_visual(ss.content.visual, ss.get("results", []))
 
 
+def img_bytes(im, fmt="PNG"):
+    b = io.BytesIO()
+    if fmt == "JPEG":
+        im.convert("RGB").save(b, "JPEG", quality=90, optimize=True)
+    else:
+        im.save(b, "PNG", optimize=False)
+    return b.getvalue()
+
+
+def card_bytes(name):
+    """PNG (for display/download) and base64 JPEG (for the publish button), encoded once per image."""
+    cache = ss.setdefault("card_cache", {})
+    if name not in cache:
+        im = ss.cards[name]
+        cache[name] = (img_bytes(im), base64.b64encode(img_bytes(im, "JPEG")).decode())
+    return cache[name]
+
+
 def make_cards():
     fig0 = ss.figures[0].image if ss.figures else None
     v, c = visual_now(), ss.content
@@ -424,6 +443,8 @@ def make_cards():
                 "wide": cards.post_image(v, c.card_title, c.institution, fig0, (1200, 675)),
                 "portrait": cards.post_image(v, c.card_title, c.institution, fig0 if not v["key_points"] else None, (1080, 1350))}
     ss.pop("carousel", None)
+    ss.pop("carousel_zip", None)
+    ss.pop("card_cache", None)
     ss.pop("anims", None)
 
 
@@ -444,6 +465,11 @@ def persist():
              "hype": [ss.hype[0], ser_results(ss.hype[1])] if ss.get("hype") else None}
     meta = {"headline": ss.content.headline, "doc_name": ss.get("doc_name", ""), "lang": ss.lang,
             "score": f"{ok}/{total}", "created": ss.get("created", time.strftime("%Y-%m-%d %H:%M"))}
+    sig = hashlib.sha1(json.dumps([ss.pid, state, meta, (ss.get("video") or [None])[0]], sort_keys=True,
+                                  default=str).encode()).hexdigest()
+    if ss.get("last_saved") == sig:          # nothing changed since the last save
+        return
+    ss.last_saved = sig
     try:
         video_file = None
         if ss.get("video"):
@@ -460,7 +486,7 @@ def persist():
 
 PROJECT_KEYS = ["pid", "created", "pdf_bytes", "passages", "doc_title", "figures", "doc_name", "content", "release",
                 "lang", "posts", "results", "cards", "person", "photo", "video", "hype", "proofs", "plan", "chat",
-                "accepted", "carousel", "anims"]
+                "accepted", "carousel", "anims", "carousel_zip", "card_cache", "last_saved", "pkg"]
 
 
 def clear_project():
@@ -677,13 +703,8 @@ BRAND = {"linkedin": ("#0a66c2", "in"), "facebook": ("#1877f2", "f"), "instagram
          "x": ("#111111", "X"), "blog": ("#3d6d5c", "B")}
 
 
-def share_button(key, label, text, url, image=None, filename="citeflow.png", height=48):
+def share_button(key, label, text, url, img_b64="", filename="citeflow.jpg", height=48):
     """One click: copies the post text, downloads the image (if any) and opens the platform in a new tab."""
-    img_b64 = ""
-    if image is not None:
-        b = io.BytesIO()
-        image.save(b, "PNG")
-        img_b64 = base64.b64encode(b.getvalue()).decode()
     color = BRAND.get(key, ("#3d6d5c", ""))[0]
     payload = json.dumps({"t": text, "u": url, "i": img_b64, "f": filename}).replace("</", "<\\/")
     components.html(f"""
@@ -699,7 +720,7 @@ b.onclick = () => {{
   try {{ ok = document.execCommand('copy'); }} catch (e) {{}}
   ta.remove();
   if (navigator.clipboard) {{ navigator.clipboard.writeText(P.t).catch(() => {{}}); }}
-  if (P.i) {{ const a = document.createElement('a'); a.href = 'data:image/png;base64,' + P.i; a.download = P.f;
+  if (P.i) {{ const a = document.createElement('a'); a.href = 'data:image/jpeg;base64,' + P.i; a.download = P.f;
              document.body.appendChild(a); a.click(); a.remove(); }}
   window.open(P.u, '_blank', 'noopener');
   b.textContent = P.i ? 'Text copied + image saved ✓' : 'Text copied ✓';
@@ -873,42 +894,102 @@ def safe_recheck():
     persist()
 
 
+@st.fragment
 def extras_view(key, card):
-    """Carousel (Instagram, LinkedIn) and animated version for a post."""
+    """Carousel (Instagram, LinkedIn) and animated version of a post. Runs on its own, so it never slows the page."""
     c = ss.content
     if key in ("instagram", "linkedin"):
         with st.expander("Carousel (swipe post)"):
-            if "carousel" not in ss:
-                ss.carousel = cards.carousel(visual_now(), c.card_title, c.institution, [f.image for f in ss.figures[:1]])
-            cols = st.columns(3)
-            for i, im in enumerate(ss.carousel):
-                cols[i % 3].image(im, width="stretch")
+            if "carousel" in ss or st.button("Show carousel", key=f"showcar_{key}", width="stretch"):
+                carousel_body(key, c)
+    with st.expander("Animated version (MP4)"):
+        anim_body(key, card, c)
+
+
+def carousel_body(key, c):
+    if "carousel" not in ss:
+        with st.spinner("Designing the carousel…"):
+            slides = cards.carousel(visual_now(), c.card_title, c.institution, [f.image for f in ss.figures[:1]])
+            ss.carousel = [img_bytes(im) for im in slides]
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w") as z:
-                for i, im in enumerate(ss.carousel, 1):
-                    b = io.BytesIO()
-                    im.save(b, "PNG")
-                    z.writestr(f"slide_{i:02d}.png", b.getvalue())
-            st.download_button(f"Download {len(ss.carousel)} slides", buf.getvalue(), f"citeflow_carousel_{key}.zip",
-                               "application/zip", width="stretch", key=f"car_{key}")
-    with st.expander("Animated version (MP4)"):
-        anims = ss.setdefault("anims", {})
-        size = {"wide": (1200, 675), "portrait": (1080, 1350)}.get(card, (1080, 1080))
-        if key not in anims:
-            if st.button("Create animation", key=f"anim_{key}", width="stretch"):
-                with st.spinner("Animating the post…"):
-                    fig0 = ss.figures[0].image if ss.figures else None
-                    v = visual_now()
-                    path = os.path.join(tempfile.mkdtemp(), f"citeflow_{key}_animated.mp4")
-                    cards.animated_post(v, c.card_title, c.institution, fig0 if (card == "wide" or not v["key_points"]) else None,
-                                        path, size=size)
-                    anims[key] = path
-                st.rerun()
-        else:
-            st.video(anims[key], loop=True, autoplay=True, muted=True)
-            with open(anims[key], "rb") as fh:
-                st.download_button("Download animation", fh.read(), os.path.basename(anims[key]), "video/mp4",
-                                   width="stretch", key=f"dla_{key}")
+                for i, png in enumerate(ss.carousel, 1):
+                    z.writestr(f"slide_{i:02d}.png", png)
+            ss.carousel_zip = buf.getvalue()
+    cols = st.columns(3)
+    for i, png in enumerate(ss.carousel):
+        cols[i % 3].image(png, width="stretch")
+    st.download_button(f"Download {len(ss.carousel)} slides", ss.carousel_zip, f"citeflow_carousel_{key}.zip",
+                       "application/zip", width="stretch", key=f"car_{key}")
+
+
+def anim_body(key, card, c):
+    anims = ss.setdefault("anims", {})
+    size = {"wide": (1200, 675), "portrait": (1080, 1350)}.get(card, (1080, 1080))
+    if key not in anims:
+        if not st.button("Create animation", key=f"anim_{key}", width="stretch"):
+            return
+        with st.spinner("Animating the post…"):
+            fig0 = ss.figures[0].image if ss.figures else None
+            v = visual_now()
+            path = os.path.join(tempfile.mkdtemp(), f"citeflow_{key}_animated.mp4")
+            cards.animated_post(v, c.card_title, c.institution,
+                                fig0 if (card == "wide" or not v["key_points"]) else None, path, size=size)
+            with open(path, "rb") as fh:
+                anims[key] = (path, fh.read())
+    if key in anims:
+        path, data = anims[key]
+        st.video(data, loop=True, autoplay=True, muted=True)
+        st.download_button("Download animation", data, os.path.basename(path), "video/mp4",
+                           width="stretch", key=f"dla_{key}")
+
+
+@st.fragment
+def fact_check_view(flagged):
+    """Runs on its own: switching filters or opening page views does not reload the whole page."""
+    res = ss.results
+    only = st.toggle("Show only claims that need attention", value=flagged)
+    for r in res:
+        if r["verdict"] == "NOT_A_CLAIM" or (only and r["verdict"] == "SUPPORTED"):
+            continue
+        with st.container(border=True):
+            st.markdown(f"{badge(r['verdict'])} <span style='color:#5f6b66;font-size:13px'>&nbsp;{r['part']} · {r['id']}</span>",
+                        unsafe_allow_html=True)
+            st.markdown(f"**{html.escape(r['text'])}**")
+            if r.get("explanation"):
+                st.caption((r["issue_type"].capitalize() + " — " if r.get("issue_type") else "") + r["explanation"])
+            for f in r.get("rule_flags", []):
+                st.caption(f"Rule check: {f}")
+            if r.get("rewrite"):
+                st.markdown(f"<div class='vp-quote'><b>Faithful version:</b> {html.escape(r['rewrite'])}</div>",
+                            unsafe_allow_html=True)
+            for p in r["evidence"]:
+                st.markdown(f"<div class='vp-quote'><b>Paper, p. {p.page}</b> · {html.escape(p.text[:600])}</div>",
+                            unsafe_allow_html=True)
+            if r["evidence"] and st.toggle("Show on the page", key=f"pv_{r['id']}"):
+                proof_viewer(r, r["id"])
+
+
+def build_package(content, res):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("press_release.txt", f"{content.headline}\n{content.subheadline}\n\n{ss.release}\n")
+        for key, text in ss.posts.items():
+            z.writestr(f"post_{key}.txt", text)
+        for name in ss.cards:
+            z.writestr(f"image_{name}.png", card_bytes(name)[0])
+        rows = io.StringIO()
+        w = csv.writer(rows)
+        w.writerow(["id", "part", "text", "verdict", "issue", "explanation", "faithful_version", "source", "rule_flags"])
+        for r in res:
+            w.writerow([r["id"], r["part"], r["text"], r["verdict"], r.get("issue_type", ""), r.get("explanation", ""),
+                        r.get("rewrite", ""), " | ".join(f"p.{p.page} {p.pid}" for p in r["evidence"]),
+                        "; ".join(r.get("rule_flags", []))])
+        z.writestr("verification_report.csv", "\ufeff" + rows.getvalue())
+        if ss.get("video"):
+            z.write(ss.video[0], os.path.basename(ss.video[0]))
+            z.write(ss.video[1], os.path.basename(ss.video[1]))
+    return buf.getvalue()
 
 
 def results_view():
@@ -992,17 +1073,16 @@ def results_view():
 <div><div class="vp-post-name">{html.escape(chans.get(key) or content.institution)}</div><div class="vp-post-meta">{label} · {'connected' if chans.get(key) else 'draft'}</div></div>
 <div style="margin-left:auto">{badge(state)}</div></div>
 <div class="vp-post-text">{html.escape(text)}</div>""", unsafe_allow_html=True)
-                    st.image(ss.cards[card], width="stretch")
+                    st.image(card_bytes(card)[0], width="stretch")
                     for r in bad:
                         st.caption(f"⚠ {r['text']} — {r.get('explanation', '')}")
                     with_image = key in ("instagram", "facebook", "linkedin")
+                    png, jpg64 = card_bytes(card)
                     share_button(key, f"Publish on {label}", text, share_url(key, text, chans),
-                                 ss.cards[card] if with_image else None, f"citeflow_{key}.png")
+                                 jpg64 if with_image else "", f"citeflow_{key}.jpg")
                     st.caption(SHARE_HELP[key])
                     b2, b3 = st.columns(2)
-                    buf = io.BytesIO()
-                    ss.cards[card].save(buf, "PNG")
-                    b2.download_button("Image", buf.getvalue(), f"citeflow_{key}.png", "image/png",
+                    b2.download_button("Image", card_bytes(card)[0], f"citeflow_{key}.png", "image/png",
                                        width="stretch", key=f"img_{key}")
                     with b3.popover("Copy text", width="stretch"):
                         st.code(text, language=None, wrap_lines=True)
@@ -1060,26 +1140,7 @@ def results_view():
                             "Your video preview appears here.</div>", unsafe_allow_html=True)
 
     with t_chk:
-        only = st.toggle("Show only claims that need attention", value=bool(flagged))
-        for r in res:
-            if r["verdict"] == "NOT_A_CLAIM" or (only and r["verdict"] == "SUPPORTED"):
-                continue
-            with st.container(border=True):
-                st.markdown(f"{badge(r['verdict'])} <span style='color:#5f6b66;font-size:13px'>&nbsp;{r['part']} · {r['id']}</span>",
-                            unsafe_allow_html=True)
-                st.markdown(f"**{html.escape(r['text'])}**")
-                if r.get("explanation"):
-                    st.caption((r["issue_type"].capitalize() + " — " if r.get("issue_type") else "") + r["explanation"])
-                for f in r.get("rule_flags", []):
-                    st.caption(f"Rule check: {f}")
-                if r.get("rewrite"):
-                    st.markdown(f"<div class='vp-quote'><b>Faithful version:</b> {html.escape(r['rewrite'])}</div>",
-                                unsafe_allow_html=True)
-                for p in r["evidence"]:
-                    st.markdown(f"<div class='vp-quote'><b>Paper, p. {p.page}</b> · {html.escape(p.text[:600])}</div>",
-                                unsafe_allow_html=True)
-                if r["evidence"] and st.toggle("Show on the page", key=f"pv_{r['id']}"):
-                    proof_viewer(r, r["id"])
+        fact_check_view(bool(flagged))
 
     with t_str:
         with st.container(border=True):
@@ -1109,27 +1170,11 @@ def results_view():
             a1 = st.checkbox("I reviewed every flagged claim and its source passage")
             a2 = st.checkbox("Placeholder quotes will be replaced with real, approved quotes from the researchers")
             if a1 and a2:
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-                    z.writestr("press_release.txt", f"{content.headline}\n{content.subheadline}\n\n{ss.release}\n")
-                    for key, text in ss.posts.items():
-                        z.writestr(f"post_{key}.txt", text)
-                    for name, im in ss.cards.items():
-                        b = io.BytesIO()
-                        im.save(b, "PNG")
-                        z.writestr(f"image_{name}.png", b.getvalue())
-                    rows = io.StringIO()
-                    w = csv.writer(rows)
-                    w.writerow(["id", "part", "text", "verdict", "issue", "explanation", "faithful_version", "source", "rule_flags"])
-                    for r in res:
-                        w.writerow([r["id"], r["part"], r["text"], r["verdict"], r.get("issue_type", ""), r.get("explanation", ""),
-                                    r.get("rewrite", ""), " | ".join(f"p.{p.page} {p.pid}" for p in r["evidence"]),
-                                    "; ".join(r.get("rule_flags", []))])
-                    z.writestr("verification_report.csv", "﻿" + rows.getvalue())
-                    if "video" in ss:
-                        z.write(ss.video[0], os.path.basename(ss.video[0]))
-                        z.write(ss.video[1], os.path.basename(ss.video[1]))
-                st.download_button("Download approved package", buf.getvalue(), "citeflow_package.zip",
+                persist()
+                sig = (ss.get("last_saved"), (ss.get("video") or [None])[0])
+                if ss.get("pkg", (None,))[0] != sig:
+                    ss.pkg = (sig, build_package(content, res))
+                st.download_button("Download approved package", ss.pkg[1], "citeflow_package.zip",
                                    "application/zip", type="primary", width="stretch")
 
     persist()
