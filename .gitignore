@@ -1,0 +1,18 @@
+# secrets
+.env
+.streamlit/secrets.toml
+
+# data and outputs (challenge materials are not redistributable)
+*.pdf
+*.mp4
+*.mp3
+*.srt
+*.zip
+sample_files_for_PR/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+!.streamlit/secrets.toml.example
