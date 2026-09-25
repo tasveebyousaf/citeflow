@@ -8,8 +8,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 FPS = 24
-NAVY, INDIGO = (11, 22, 51), (36, 30, 92)
-ACCENT, WHITE, MUTED = (255, 138, 92), (255, 255, 255), (190, 198, 220)
+NAVY, INDIGO = (31, 56, 47), (61, 109, 92)          # CiteFlow deep green -> green
+ACCENT, WHITE, MUTED = (228, 183, 82), (255, 255, 255), (208, 222, 214)
 VOICES = {"English": ["en-US-AvaMultilingualNeural", "en-GB-SoniaNeural"],
           "Hungarian": ["hu-HU-NoemiNeural", "hu-HU-TamasNeural"]}
 FORMATS = {"Landscape 16:9": (1280, 720), "Vertical 9:16": (720, 1280)}
@@ -92,7 +92,7 @@ def blobs(w, h, t, seed=0):
     layer = Image.new("RGB", (w // 4, h // 4))
     d = ImageDraw.Draw(layer)
     rng = np.random.default_rng(seed)
-    for k, col in enumerate([(255, 138, 92), (110, 92, 255), (64, 180, 255)]):
+    for k, col in enumerate([(228, 183, 82), (79, 142, 120), (235, 201, 126)]):
         cx = (rng.uniform(0, w // 4) + 20 * np.sin(t * 0.5 + k)) % (w // 4)
         cy = rng.uniform(0, h // 4) + 14 * np.cos(t * 0.4 + 2 * k)
         r = rng.uniform(0.18, 0.3) * min(w, h) / 4
@@ -116,7 +116,7 @@ def shade(w, h):
     a += 0.35 + 0.45 * (yy ** 1.6) + 0.25 * ((1 - yy) ** 3)
     a = np.clip(a, 0, 0.88)
     rgba = np.zeros((h, w, 4), np.uint8)
-    rgba[..., :3] = (8, 12, 30)
+    rgba[..., :3] = (14, 28, 22)
     rgba[..., 3] = (a * 255).astype(np.uint8)
     return Image.fromarray(np.repeat(rgba, 1, axis=1), "RGBA")
 
@@ -238,11 +238,6 @@ class Scene:
         a = ease(t / 0.6)
         m = int(W * 0.07)
 
-        if self.kw.get("broll") is not None:
-            lab = tx(self.kw.get("lang", "English"), "stock")
-            f = font(16)
-            d.text((W - m - d.textlength(lab, font=f), m * 0.6), lab, font=f, fill=(200, 205, 220))
-
         if self.kind == "title":
             inst = self.kw.get("institution", "").upper()
             f_i = font(22 if not self.vertical else 24, True)
@@ -306,8 +301,7 @@ class Scene:
                     d = ImageDraw.Draw(img)
             else:
                 text_w, ty = W - 2 * m, H * (0.22 if not self.vertical else 0.30)
-            check_icon(d, m, ty - 43, 16, ACCENT)
-            d.text((m + 24, ty - 44), tag, font=font(18, True), fill=ACCENT)
+            d.rectangle([m, ty - 30, m + 56, ty - 24], fill=ACCENT)   # accent rule above the headline
             y = ty
             for ln in wrap(d, headline, hf, text_w)[:4]:
                 d.text((m - 30 * (1 - a), y), ln, font=hf, fill=tuple(int(c * a) for c in WHITE))
@@ -464,8 +458,5 @@ def render_card(title, institution, figure=None, size=(1080, 1080), lang="Englis
             card, mask, _ = figure_card(figure, box_w, box_h)
             img.paste(card, (pad + (box_w - card.width) // 2, top), mask)
     d = ImageDraw.Draw(img)
-    fs = int(w * 0.022)
-    check_icon(d, pad, h - int(h * 0.085) + fs * 0.15, fs * 0.85, ACCENT)
-    d.text((pad + fs * 1.4, h - int(h * 0.085)), tx(lang, "card"), font=font(fs), fill=MUTED)
     d.rectangle([0, h - 8, w, h], fill=ACCENT)
     return img

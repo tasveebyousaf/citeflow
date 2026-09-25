@@ -144,6 +144,14 @@ class Posts(BaseModel):
     x: str
 
 
+class Visual(BaseModel):
+    kicker: str
+    stat_value: str
+    stat_label: str
+    key_points: list[str]
+    cta: str
+
+
 class Content(BaseModel):
     headline: str
     subheadline: str
@@ -153,6 +161,7 @@ class Content(BaseModel):
     posts: Posts
     video_title: str
     scenes: list[Scene]
+    visual: Visual
 
 
 class Verdict(BaseModel):
@@ -171,6 +180,30 @@ class Report(BaseModel):
 class Hyped(BaseModel):
     press_release: str
 
+
+class PlatformPlan(BaseModel):
+    platform: str
+    best_days: list[str]
+    best_times: list[str]
+    hashtags: list[str]
+    format_tip: str
+    why: str
+
+
+class PlanStep(BaseModel):
+    day: str
+    time: str
+    platform: str
+    action: str
+
+
+class PublishPlan(BaseModel):
+    audience_summary: str
+    platforms: list[PlatformPlan]
+    schedule: list[PlanStep]
+    trend_angles: list[str]
+    avoid: list[str]
+
 # ---------------------------------------------------------------- prompts
 
 GEN_PROMPT = """You are the best science writer in a university communications office. You write for real people,
@@ -182,6 +215,8 @@ Accuracy rules (non-negotiable):
 - Keep claim strength equal to the source: no causal claims from correlations, no simulation/lab/small-sample results
   presented as real-world or clinical, no "assists experts" turned into "replaces experts". Keep the key limitation.
 - Never invent quotes. Where a quote belongs, write exactly: [Quote from the researchers to be added after approval]
+- This content is for the public. Never mention fact-checking, verification, "the source", "the paper says", page numbers
+  or this tool. Just tell the story in an engaging, confident (but accurate) way.
 
 Style:
 - Open with a human hook: the everyday problem, who it affects, why it matters. Then what the team did, what they found,
@@ -189,6 +224,12 @@ Style:
 - headline: max 12 words, specific and intriguing, no hype words ("breakthrough", "revolutionary").
 - institution: the lead institution and faculty as named in the source (short).
 - card_title: max 7 words for an image card.
+- visual (text for designed social images and carousels; short, punchy, all taken from the source):
+  kicker: 2-4 word label in capitals style (e.g. "NEW RESEARCH", "MASTER'S PROGRAMME");
+  stat_value: the single most striking number from the source exactly as written there (e.g. "120", "14.7%"), or "" if none;
+  stat_label: what that number means, max 6 words (or "" if no stat);
+  key_points: exactly 3 facts, each max 12 words;
+  cta: call to action, max 6 words (e.g. "Apply by 15 May", "Read the full study").
 - press_release: 300-420 words, plain paragraphs separated by blank lines, no markdown.
 - posts.linkedin: 80-140 words, professional but personal, line breaks, 3 hashtags at the end.
 - posts.facebook: 50-90 words, friendly, a question to the reader, 2 hashtags.
@@ -241,6 +282,43 @@ PRESS RELEASE:
 {text}
 """
 
+REVISE_PROMPT = """You are revising public communication material for a university communications office.
+Apply the user's feedback to the CURRENT CONTENT below and return the complete updated content (all fields).
+Change only what the feedback asks for; keep everything else as it is. Output language: keep the current language
+unless the feedback asks for another one.
+The accuracy rules still apply: every factual statement must stay supported by the source document, with the same
+strength as the source; no invented facts, numbers or quotes; keep [Quote from the researchers to be added after approval]
+placeholders. Never mention fact-checking, verification or the source in the public text.
+If the feedback asks for something that would make a claim inaccurate, apply the style part of the request but keep the claim accurate.
+
+FEEDBACK (what to change{target}):
+{feedback}
+
+CURRENT CONTENT (JSON):
+{current}
+
+SOURCE DOCUMENT (numbered passages):
+{source}
+"""
+
+PLAN_PROMPT = """You are a social media strategist for a university communications team in {region}.
+Create a publishing plan for the content below: when to post on each platform, which hashtags to use and how.
+Base it on well-established engagement patterns for each platform and audience (researchers, students, industry, general public)
+and on the topic of the research. Do not claim access to live platform data.
+
+Return:
+- audience_summary: one sentence on who this story will reach best.
+- platforms: one entry each for LinkedIn, Facebook, Instagram and X, with best_days (2-3 weekdays), best_times (1-3 local time
+  windows like "08:00-10:00"), hashtags (5-8: mix of broad, niche/topic and institutional; no spaces; include the # sign),
+  format_tip (one sentence: e.g. carousel, native video, thread), why (one sentence).
+- schedule: 5-7 steps for the launch week in order (day like "Tuesday", time like "09:00", platform, action).
+- trend_angles: 3 topical angles or current conversations this research connects to (phrase them as angles, not as data).
+- avoid: 2-3 things to avoid for this topic (e.g. misleading medical framing, engagement bait).
+
+CONTENT:
+{content}
+"""
+
 # ---------------------------------------------------------------- LLM client
 
 TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "INTERNAL", "overloaded", "high demand",
@@ -256,6 +334,7 @@ class LLM:
         self.models = [model] + [m for m in (fallbacks or []) if m != model]
         self.model = model
         self.fast = True
+        self.last_error = None
         self.log: list[str] = []
 
     def _config(self, model: str, schema, temperature: float):
@@ -280,27 +359,37 @@ class LLM:
     def json_call(self, prompt: str, schema, temperature: float = 0.2, fast: bool = True):
         self.fast = fast
         last = None
-        for model in self.models:
-            attempt = 0
-            while attempt < 3:
-                try:
-                    out = self._once(model, prompt, schema, temperature)
-                    self.model = model
+        deadline = time.time() + 150            # keep trying busy models for up to ~2.5 minutes
+        for rnd in range(2):                    # two passes over all models
+            for model in self.models:
+                out = self._try_model(model, prompt, schema, temperature, deadline)
+                if out is not None:
                     return out
-                except Exception as e:
-                    last, msg = e, str(e)
-                    if self.fast and "thinking" in msg.lower():
-                        self.fast = False          # model does not accept the speed setting
-                        continue
-                    if "404" in msg or "NOT_FOUND" in msg:
-                        self.log.append(f"{model}: not available")
-                        break
-                    if not any(t in msg for t in TRANSIENT):
-                        raise
-                    attempt += 1
-                    self.log.append(f"{model}: busy, retry {attempt}")
-                    time.sleep(2 * attempt)
-        raise last
+                if time.time() > deadline:
+                    break
+        raise self.last_error or RuntimeError("All models are busy")
+
+    def _try_model(self, model, prompt, schema, temperature, deadline):
+        attempt = 0
+        while attempt < 2 and time.time() < deadline:
+            try:
+                out = self._once(model, prompt, schema, temperature)
+                self.model = model
+                return out
+            except Exception as e:
+                self.last_error, msg = e, str(e)
+                if self.fast and "thinking" in msg.lower():
+                    self.fast = False          # model does not accept the speed setting
+                    continue
+                if "404" in msg or "NOT_FOUND" in msg:
+                    self.log.append(f"{model}: not available")
+                    return None
+                if not any(t in msg for t in TRANSIENT):
+                    raise
+                attempt += 1
+                self.log.append(f"{model}: busy, retry {attempt}")
+                time.sleep(3 * attempt)
+        return None
 
 
 def rank_model(name: str):
@@ -328,6 +417,19 @@ def generate_content(llm: LLM, passages, lang: str) -> Content:
     return llm.json_call(GEN_PROMPT.format(lang=lang, source=passages_block(passages)), Content, 0.7)
 
 
+def revise_content(llm: LLM, passages, current: Content, feedback: str, target: str = "") -> Content:
+    tgt = f", focus on: {target}" if target else ""
+    return llm.json_call(REVISE_PROMPT.format(feedback=feedback, target=tgt,
+                                              current=current.model_dump_json(indent=1),
+                                              source=passages_block(passages)), Content, 0.5)
+
+
+def publish_plan(llm: LLM, content: Content, region: str = "Hungary (Central European Time)") -> PublishPlan:
+    summary = json.dumps({"headline": content.headline, "subheadline": content.subheadline,
+                          "institution": content.institution, "posts": content.posts.model_dump()}, ensure_ascii=False)
+    return llm.json_call(PLAN_PROMPT.format(region=region, content=summary), PublishPlan, 0.4)
+
+
 def hype_version(llm: LLM, text: str) -> str:
     return llm.json_call(HYPE_PROMPT.format(text=text), Hyped, 0.9).press_release
 
@@ -346,7 +448,20 @@ def split_sentences(text: str) -> list[str]:
 POST_KEYS = [("linkedin", "L", "LinkedIn"), ("facebook", "F", "Facebook"), ("instagram", "I", "Instagram"), ("x", "X", "X")]
 
 
-def build_items(headline: str, press_release: str, scenes, posts: dict | None = None) -> list[dict]:
+def visual_texts(visual) -> list[tuple[str, str]]:
+    """(id, text) pairs of the factual text printed on images."""
+    if visual is None:
+        return []
+    out = []
+    if visual.stat_value.strip():
+        out.append(("K0", f"{visual.stat_value.strip()} {visual.stat_label.strip()}".strip()))
+    for i, k in enumerate(visual.key_points, 1):
+        if k.strip():
+            out.append((f"K{i}", k.strip()))
+    return out
+
+
+def build_items(headline: str, press_release: str, scenes, posts: dict | None = None, visual=None) -> list[dict]:
     items = []
     if headline.strip():
         items.append({"id": "H1", "part": "Headline", "text": headline.strip()})
@@ -355,9 +470,30 @@ def build_items(headline: str, press_release: str, scenes, posts: dict | None = 
     for key, prefix, label in POST_KEYS:
         for i, s in enumerate(split_sentences((posts or {}).get(key, "")), 1):
             items.append({"id": f"{prefix}{i}", "part": label, "text": s})
+    for kid, text in visual_texts(visual):
+        items.append({"id": kid, "part": "Image text", "text": text})
     for i, sc in enumerate(scenes or [], 1):
         items.append({"id": f"V{i}", "part": "Video", "text": sc.narration.strip()})
     return items
+
+
+def safe_visual(visual, results):
+    """Image text used on public images: flagged facts are replaced by their faithful version (or dropped)."""
+    by_id = {r["id"]: r for r in results}
+
+    def fix(kid, text):
+        r = by_id.get(kid)
+        if r and r["verdict"] in WRONG:                 # wrong facts: faithful version, or leave out
+            return r.get("rewrite", "").strip()
+        return text                                     # supported, accepted or only "needs review": keep
+    stat_ok = True
+    r0 = by_id.get("K0")
+    if r0 and r0["verdict"] in WRONG:
+        stat_ok = False
+    points = [fix(f"K{i}", k) for i, k in enumerate(visual.key_points, 1)]
+    return {"kicker": visual.kicker.strip(), "stat_value": visual.stat_value.strip() if stat_ok else "",
+            "stat_label": visual.stat_label.strip() if stat_ok else "", "key_points": [k for k in points if k][:3],
+            "cta": visual.cta.strip()}
 
 
 NUM_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?!\d)|\d+(?:[.,]\d+)?")
@@ -425,6 +561,7 @@ def verify(llm: LLM, passages, items: list[dict]) -> list[dict]:
 
 
 FLAGGED = {"EXAGGERATED", "UNSUPPORTED", "NEEDS_REVIEW", "UNCHECKED"}
+WRONG = {"EXAGGERATED", "UNSUPPORTED"}
 
 
 def score(results: list[dict]) -> tuple[int, int]:
@@ -440,7 +577,7 @@ def safe_scenes(scenes, results, figures: list[Figure]) -> list[dict]:
     for i, sc in enumerate(scenes, 1):
         r = by_id.get(f"V{i}")
         narr, status = sc.narration.strip(), "verified"
-        if r and r["verdict"] in FLAGGED:
+        if r and r["verdict"] in WRONG:
             if r.get("rewrite"):
                 narr, status = r["rewrite"].strip(), "corrected"
             else:

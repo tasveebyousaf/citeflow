@@ -16,3 +16,6 @@ __pycache__/
 .venv/
 venv/
 !.streamlit/secrets.toml.example
+
+# user accounts and saved projects
+data/
