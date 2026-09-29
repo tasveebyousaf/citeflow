@@ -1,0 +1,9 @@
+# Weekly check for security updates of the Python packages in requirements.txt
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    
