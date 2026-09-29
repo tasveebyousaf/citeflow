@@ -1,0 +1,347 @@
+{
+ "description": "Labelled statements for measuring CiteFlow's fact-checker. 'ok' = faithful to the paper, 'wrong' = distorted in the way named by 'kind'. Papers are the DEIK.AI Challenge sample papers (not in the repository).",
+ "papers": {
+  "1-s2.0-S174680942601270X-main.pdf": "Automatic screening system for conventional Pap smear analysis",
+  "1-s2.0-S0038092X26000496-main.pdf": "Post-processing of ensemble PV power forecasts",
+  "1-s2.0-S2590123026011850-main.pdf": "Hybrid framework for UAV obstacle avoidance (LT-DQN)",
+  "Tardi_2026_PASP_138_044506.pdf": "Reinforcement learning for observatory placement"
+ },
+ "claims": [
+  {
+   "id": "A01",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The system is designed to assist cytological experts in evaluating Pap smears."
+  },
+  {
+   "id": "A02",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "It was evaluated on a private dataset of 339 expert-annotated smears collected in a clinical setting."
+  },
+  {
+   "id": "A03",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Cells are classified by an ensemble of nine deep neural networks."
+  },
+  {
+   "id": "A04",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Using cross-validation, the system reached an average smear-level classification accuracy of 88.8%."
+  },
+  {
+   "id": "A05",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The system's sensitivity was 96.6%, while its specificity was 72.2%."
+  },
+  {
+   "id": "A06",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The authors say multi-center validation will enable regulatory approval and clinical integration."
+  },
+  {
+   "id": "A07",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "The system reached an average accuracy of 98.8%."
+  },
+  {
+   "id": "A08",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "rounding",
+   "text": "The system was about 90% accurate."
+  },
+  {
+   "id": "A09",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "overclaim",
+   "text": "The system replaces pathologists in cervical cancer screening."
+  },
+  {
+   "id": "A10",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "certainty",
+   "text": "The system detects every case of cervical cancer."
+  },
+  {
+   "id": "A11",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "invented",
+   "text": "The system was tested on more than 10,000 smears from hospitals across Europe."
+  },
+  {
+   "id": "A12",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "attribution",
+   "text": "Its specificity of 96.6% means very few false alarms."
+  },
+  {
+   "id": "A13",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "removed_limitation",
+   "text": "The system is ready for routine clinical use."
+  },
+  {
+   "id": "B14",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The study compared seven statistical post-processing methods for ensemble photovoltaic power forecasts."
+  },
+  {
+   "id": "B15",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The data come from seven utility-scale PV plants in Hungary."
+  },
+  {
+   "id": "B16",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Statistical calibration reduced CRPS by 11.1–14.7% compared to the raw ensemble."
+  },
+  {
+   "id": "B17",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Quantile regression neural networks outperformed distributional regression methods."
+  },
+  {
+   "id": "B18",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The skill of the best model depended strongly on location, ranging from 11.89% to 19.32%."
+  },
+  {
+   "id": "B19",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "During peak production hours, post-processing gave a relative improvement of around 10% over the raw ensemble."
+  },
+  {
+   "id": "B20",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "rounding",
+   "text": "Statistical calibration reduced forecast errors by 11–15%."
+  },
+  {
+   "id": "B21",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "Statistical calibration cut CRPS by up to 25%."
+  },
+  {
+   "id": "B22",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "overgeneralisation",
+   "text": "The study compared seven methods at PV plants across Europe."
+  },
+  {
+   "id": "B23",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "certainty",
+   "text": "Post-processing eliminates forecast errors from solar power predictions."
+  },
+  {
+   "id": "B24",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "attribution",
+   "text": "Distributional regression methods outperformed quantile regression neural networks."
+  },
+  {
+   "id": "B25",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "invented",
+   "text": "The new forecasting method will cut electricity prices for Hungarian households."
+  },
+  {
+   "id": "C26",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "LT-DQN combines a learned DQN controller, LiDAR-based A* planning and a reactive fallback for UAV navigation."
+  },
+  {
+   "id": "C27",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The framework was evaluated in Unreal Engine with Microsoft AirSim in two environments with static and dynamic obstacles."
+  },
+  {
+   "id": "C28",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "In the tested configurations, LT-DQN achieved a 100% success rate with zero collisions."
+  },
+  {
+   "id": "C29",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The control-cycle time was 2.60 ± 0.31 ms."
+  },
+  {
+   "id": "C30",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "All evaluations were simulation-based, and real-world flights remain future work."
+  },
+  {
+   "id": "C31",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "simulation_as_real",
+   "text": "LT-DQN achieved a 100% success rate in real-world drone flights."
+  },
+  {
+   "id": "C32",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "overgeneralisation",
+   "text": "The drones never collide in any environment."
+  },
+  {
+   "id": "C33",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "The control-cycle time was 0.26 ms."
+  },
+  {
+   "id": "C34",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "invented",
+   "text": "The framework is already deployed in commercial delivery drones."
+  },
+  {
+   "id": "C35",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "LT-DQN achieved a 40.3 s time-to-goal at 10 m/s."
+  },
+  {
+   "id": "C36",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "certainty",
+   "text": "The multi-UAV tests had a minimum clearance of 5.17 m, proving the system is completely safe."
+  },
+  {
+   "id": "D37",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The researchers used reinforcement learning to optimise the placement of astronomical observatories."
+  },
+  {
+   "id": "D38",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The agent considers environmental factors such as cloud cover, light pollution and geographic limitations."
+  },
+  {
+   "id": "D39",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "An optimized 8-camera configuration achieved a 39.7% improvement in normalized reward over the current 10-camera placement."
+  },
+  {
+   "id": "D40",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "A 9-camera optimized layout reached a 41.8% improvement."
+  },
+  {
+   "id": "D41",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Adding one to three cameras to the existing system improved performance by 12.5% to 30.6%."
+  },
+  {
+   "id": "D42",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Beyond three additional cameras, the benefit becomes smaller."
+  },
+  {
+   "id": "D43",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "overclaim",
+   "text": "An optimized layout doubles the sky coverage of the Hungarian camera network."
+  },
+  {
+   "id": "D44",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "contradiction",
+   "text": "Adding more cameras always keeps increasing coverage at the same rate."
+  },
+  {
+   "id": "D45",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "The optimized 8-camera configuration achieved a 49.7% improvement."
+  },
+  {
+   "id": "D46",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "overgeneralisation",
+   "text": "The method was demonstrated on meteor camera networks across Europe."
+  },
+  {
+   "id": "D47",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "certainty",
+   "text": "The reinforcement learning approach guarantees the best possible observatory location anywhere on Earth."
+  },
+  {
+   "id": "D48",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "invented",
+   "text": "The project was funded by the European Space Agency."
+  }
+ ]
+}

@@ -7,7 +7,7 @@ import os
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-FPS = 24
+FPS = 20
 NAVY, INDIGO = (31, 56, 47), (61, 109, 92)          # CiteFlow deep green -> green
 ACCENT, WHITE, MUTED = (228, 183, 82), (255, 255, 255), (208, 222, 214)
 VOICES = {"English": ["en-US-AvaMultilingualNeural", "en-GB-SoniaNeural"],
@@ -101,12 +101,11 @@ def blobs(w, h, t, seed=0):
 
 
 def cover(img, w, h, zoom=1.0):
-    """Scale-to-fill crop with a zoom factor (for camera push-ins)."""
+    """Scale-to-fill crop with a zoom factor (for camera push-ins). Crops first, then resizes only what is shown."""
     s = max(w / img.width, h / img.height) * zoom
-    nw, nh = int(img.width * s) + 1, int(img.height * s) + 1
-    im = img.resize((nw, nh), Image.BILINEAR)
-    x, y = (nw - w) // 2, (nh - h) // 2
-    return im.crop((x, y, x + w, y + h))
+    cw, ch = w / s, h / s
+    x0, y0 = (img.width - cw) / 2, (img.height - ch) / 2
+    return img.resize((w, h), Image.BILINEAR, box=(x0, y0, x0 + cw, y0 + ch))
 
 
 def shade(w, h):
@@ -198,6 +197,8 @@ class Scene:
         self.vertical = H > W
         self.shade = shade(W, H)
         self.broll = kw.get("broll")            # moviepy clip or None
+        # soft animated-light background, computed once per scene (only the camera zoom moves per frame)
+        self.static_bg = None if self.broll is not None else blobs(W, H, t0, hash(kw.get("seed", 0)) % 1000)
         self.words = kw.get("words") or []
         self.groups = self._group(self.words)
         fig = kw.get("figure")
@@ -226,7 +227,7 @@ class Scene:
             tt = min(t, self.broll.duration - 0.05) if self.broll.duration > t else t % max(self.broll.duration - 0.05, 0.1)
             img = cover(Image.fromarray(self.broll.get_frame(tt)), W, H, z)
         else:
-            img = cover(blobs(W, H, self.t0 + t, hash(self.kw.get("seed", 0)) % 1000), W, H, z)
+            img = cover(self.static_bg, W, H, z)
         img = img.convert("RGBA")
         img.alpha_composite(self.shade)
         return img.convert("RGB")
@@ -285,7 +286,7 @@ class Scene:
                 y += fz.size
 
         else:  # story scene
-            tag, headline = self.kw.get("tag", ""), self.kw.get("text", "")
+            headline = self.kw.get("text", "")
             hf = font(46 if not self.vertical else 54, True)
             if self.card is not None:
                 ca = ease((t - 0.25) / 0.6)
@@ -360,32 +361,49 @@ def render_video(title, institution, outro_text, scenes, figures, lang, workdir,
     W, H = FORMATS.get(fmt, FORMATS["Landscape 16:9"])
     orient = "portrait" if H > W else "landscape"
     os.makedirs(workdir, exist_ok=True)
-    step = lambda x: progress(min(x, 0.99)) if progress else None
+
+    def step(x):
+        if progress:
+            progress(min(x, 0.99))
 
     plan, narrated, used_stock, opened = [], True, False, []
 
+    # Record every voice-over line and fetch every stock clip at the same time (instead of one after another).
+    from concurrent.futures import ThreadPoolExecutor
+    first_q = scenes[0].get("stock_query") if scenes else ""
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        voice_jobs = [ex.submit(speak, sc["narration"], lang, os.path.join(workdir, f"voice{i}.mp3"))
+                      for i, sc in enumerate(scenes, 1)]
+        clip_jobs = [ex.submit(pexels_clip, q, pexels_key, orient, workdir, i) if (pexels_key and q) else None
+                     for i, q in enumerate([first_q] + [sc.get("stock_query", "") for sc in scenes])]
+        voices = [j.result() for j in voice_jobs]
+        clip_paths = []
+        for j in clip_jobs:
+            try:
+                clip_paths.append(j.result() if j else None)
+            except Exception:
+                clip_paths.append(None)
+    step(0.35)
+
     def broll_for(q, i):
         nonlocal used_stock
-        if not (pexels_key and q):
+        p = clip_paths[i] if i < len(clip_paths) else None
+        if not p:
             return None
         try:
-            p = pexels_clip(q, pexels_key, orient, workdir, i)
-            if p:
-                c = VideoFileClip(p, audio=False)
-                opened.append(c)
-                used_stock = True
-                return c
+            c = VideoFileClip(p, audio=False)
+            opened.append(c)
+            used_stock = True
+            return c
         except Exception:
             return None
-        return None
 
-    first_q = scenes[0].get("stock_query") if scenes else ""
     plan.append(dict(kind="title", dur=3.4, text=title, broll=broll_for(first_q, 0)))
     if photo is not None and person_name.strip():
         plan.append(dict(kind="person", dur=3.0, photo=photo, name=person_name))
     for i, sc in enumerate(scenes, 1):
         path = os.path.join(workdir, f"voice{i}.mp3")
-        words = speak(sc["narration"], lang, path)
+        words = voices[i - 1]
         if words is not None and os.path.exists(path):
             audio = AudioFileClip(path)
             dur = audio.duration + 0.45
@@ -422,8 +440,8 @@ def render_video(title, institution, outro_text, scenes, figures, lang, workdir,
     video = concatenate_videoclips(clips, method="compose", padding=-fade)
     mp4 = os.path.join(workdir, f"citeflow_{orient}.mp4")
     step(0.7)
-    video.write_videofile(mp4, fps=FPS, codec="libx264", audio_codec="aac", preset="veryfast",
-                          threads=4, logger=None)
+    video.write_videofile(mp4, fps=FPS, codec="libx264", audio_codec="aac", preset="ultrafast",
+                          threads=os.cpu_count() or 4, logger=None)
     video.close()
     for c in opened:
         try:

@@ -1,0 +1,761 @@
+{
+ "checker": "gemini-3.8-flash",
+ "models_used": {
+  "gemini-3.5-flash-lite": 7,
+  "gemini-3.7-flash": 1
+ },
+ "failed_attempts": {
+  "gemini-3.8-flash": 16,
+  "gemini-3.7-flash": 14,
+  "gemini-3.6-flash": 14
+ },
+ "setting": "same",
+ "writer": "gemini-3.8-flash",
+ "rows": [
+  {
+   "id": "A01",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The system is designed to assist cytological experts in evaluating Pap smears.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2"
+   ]
+  },
+  {
+   "id": "A02",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "It was evaluated on a private dataset of 339 expert-annotated smears collected in a clinical setting.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2",
+    "P3-5"
+   ]
+  },
+  {
+   "id": "A03",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Cells are classified by an ensemble of nine deep neural networks.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2",
+    "P4-3"
+   ]
+  },
+  {
+   "id": "A04",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Using cross-validation, the system reached an average smear-level classification accuracy of 88.8%.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2",
+    "P7-5"
+   ]
+  },
+  {
+   "id": "A05",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The system's sensitivity was 96.6%, while its specificity was 72.2%.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P7-5"
+   ]
+  },
+  {
+   "id": "A06",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The authors say multi-center validation will enable regulatory approval and clinical integration.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P8-11",
+    "P8-13"
+   ]
+  },
+  {
+   "id": "A07",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "The system reached an average accuracy of 98.8%.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states an average smear-level classification accuracy of 88.8%, not 98.8%.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2",
+    "P7-5"
+   ]
+  },
+  {
+   "id": "A08",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "rounding",
+   "text": "The system was about 90% accurate.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states an average smear-level classification accuracy of 88.8% using cross-validation.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2",
+    "P7-5"
+   ]
+  },
+  {
+   "id": "A09",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "overclaim",
+   "text": "The system replaces pathologists in cervical cancer screening.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states the system is designed to assist cytological experts rather than replace them.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2",
+    "P7-9"
+   ]
+  },
+  {
+   "id": "A10",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "certainty",
+   "text": "The system detects every case of cervical cancer.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source reports a sensitivity of 96.6% rather than detection of every single case.",
+   "rule_flags": [],
+   "evidence": [
+    "P7-5",
+    "P7-9"
+   ]
+  },
+  {
+   "id": "A11",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "invented",
+   "text": "The system was tested on more than 10,000 smears from hospitals across Europe.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states the validation was performed on a private dataset of 339 expert-annotated smears.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2",
+    "P3-5"
+   ]
+  },
+  {
+   "id": "A12",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "attribution",
+   "text": "Its specificity of 96.6% means very few false alarms.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P7-5"
+   ]
+  },
+  {
+   "id": "A13",
+   "paper": "1-s2.0-S174680942601270X-main.pdf",
+   "label": "wrong",
+   "kind": "removed_limitation",
+   "text": "The system is ready for routine clinical use.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states that multi-center validation and regulatory approval remain essential before clinical integration.",
+   "rule_flags": [],
+   "evidence": [
+    "P8-6",
+    "P8-11"
+   ]
+  },
+  {
+   "id": "B14",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The study compared seven statistical post-processing methods for ensemble photovoltaic power forecasts.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3",
+    "P1-4"
+   ]
+  },
+  {
+   "id": "B15",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The data come from seven utility-scale PV plants in Hungary.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-4",
+    "P3-4"
+   ]
+  },
+  {
+   "id": "B16",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Statistical calibration reduced CRPS by 11.1–14.7% compared to the raw ensemble.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3",
+    "P2-1"
+   ]
+  },
+  {
+   "id": "B17",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Quantile regression neural networks outperformed distributional regression methods.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3",
+    "P2-1"
+   ]
+  },
+  {
+   "id": "B18",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The skill of the best model depended strongly on location, ranging from 11.89% to 19.32%.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P8-6"
+   ]
+  },
+  {
+   "id": "B19",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "During peak production hours, post-processing gave a relative improvement of around 10% over the raw ensemble.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P8-7"
+   ]
+  },
+  {
+   "id": "B20",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "rounding",
+   "text": "Statistical calibration reduced forecast errors by 11–15%.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states that statistical calibration reduces CRPS by 11.1–14.7%, not forecast errors by 11–15%.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3",
+    "P2-1"
+   ]
+  },
+  {
+   "id": "B21",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "Statistical calibration cut CRPS by up to 25%.",
+   "verdict": "NEEDS_REVIEW",
+   "flagged": true,
+   "explanation": "",
+   "rule_flags": [
+    "number(s) not found in cited passages: 25"
+   ],
+   "evidence": [
+    "P1-3",
+    "P2-1"
+   ]
+  },
+  {
+   "id": "B22",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "overgeneralisation",
+   "text": "The study compared seven methods at PV plants across Europe.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-4"
+   ]
+  },
+  {
+   "id": "B23",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "certainty",
+   "text": "Post-processing eliminates forecast errors from solar power predictions.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states that post-processing mitigates and reduces forecast deficiencies rather than eliminating forecast errors entirely.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-4",
+    "P2-4"
+   ]
+  },
+  {
+   "id": "B24",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "attribution",
+   "text": "Distributional regression methods outperformed quantile regression neural networks.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states that quantile regression neural networks outperform distributional regression methods, while the item reverses this relationship.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3",
+    "P2-1"
+   ]
+  },
+  {
+   "id": "B25",
+   "paper": "1-s2.0-S0038092X26000496-main.pdf",
+   "label": "wrong",
+   "kind": "invented",
+   "text": "The new forecasting method will cut electricity prices for Hungarian households.",
+   "verdict": "UNSUPPORTED",
+   "flagged": true,
+   "explanation": "The source discusses post-processing forecasting methods at seven PV plants in Hungary and makes no mention of cutting electricity prices for households.",
+   "rule_flags": [],
+   "evidence": []
+  },
+  {
+   "id": "C26",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "LT-DQN combines a learned DQN controller, LiDAR-based A* planning and a reactive fallback for UAV navigation.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3"
+   ]
+  },
+  {
+   "id": "C27",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The framework was evaluated in Unreal Engine with Microsoft AirSim in two environments with static and dynamic obstacles.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3"
+   ]
+  },
+  {
+   "id": "C28",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "In the tested configurations, LT-DQN achieved a 100% success rate with zero collisions.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3",
+    "P2-7"
+   ]
+  },
+  {
+   "id": "C29",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The control-cycle time was 2.60 ± 0.31 ms.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3"
+   ]
+  },
+  {
+   "id": "C30",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "All evaluations were simulation-based, and real-world flights remain future work.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P13-3"
+   ]
+  },
+  {
+   "id": "C31",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "simulation_as_real",
+   "text": "LT-DQN achieved a 100% success rate in real-world drone flights.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source explicitly states that all evaluations were simulation-based and real-world flights remain future work.",
+   "rule_flags": [],
+   "evidence": [
+    "P13-3"
+   ]
+  },
+  {
+   "id": "C32",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "overgeneralisation",
+   "text": "The drones never collide in any environment.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states zero collisions occurred across the tested configurations in the evaluation trials, not that they never collide in any environment.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3"
+   ]
+  },
+  {
+   "id": "C33",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "The control-cycle time was 0.26 ms.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states the control-cycle time was 2.60 ms, not 0.26 ms.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3"
+   ]
+  },
+  {
+   "id": "C34",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "invented",
+   "text": "The framework is already deployed in commercial delivery drones.",
+   "verdict": "UNSUPPORTED",
+   "flagged": true,
+   "explanation": "The source indicates the framework is evaluated in simulation using Unreal Engine and AirSim, and has not yet been deployed in commercial delivery drones.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3",
+    "P12-8"
+   ]
+  },
+  {
+   "id": "C35",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "LT-DQN achieved a 40.3 s time-to-goal at 10 m/s.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states that the 40.3 s time-to-goal was achieved at 6 m/s, not 10 m/s.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3"
+   ]
+  },
+  {
+   "id": "C36",
+   "paper": "1-s2.0-S2590123026011850-main.pdf",
+   "label": "wrong",
+   "kind": "certainty",
+   "text": "The multi-UAV tests had a minimum clearance of 5.17 m, proving the system is completely safe.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states a minimum clearance of 5.17 m and favorable metrics, but does not claim it proves the system is completely safe.",
+   "rule_flags": [],
+   "evidence": [
+    "P1-3"
+   ]
+  },
+  {
+   "id": "D37",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The researchers used reinforcement learning to optimise the placement of astronomical observatories.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-1",
+    "P1-2"
+   ]
+  },
+  {
+   "id": "D38",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "The agent considers environmental factors such as cloud cover, light pollution and geographic limitations.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P1-2",
+    "P1-6"
+   ]
+  },
+  {
+   "id": "D39",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "An optimized 8-camera configuration achieved a 39.7% improvement in normalized reward over the current 10-camera placement.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P13-1"
+   ]
+  },
+  {
+   "id": "D40",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "A 9-camera optimized layout reached a 41.8% improvement.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P13-1"
+   ]
+  },
+  {
+   "id": "D41",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Adding one to three cameras to the existing system improved performance by 12.5% to 30.6%.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P13-1"
+   ]
+  },
+  {
+   "id": "D42",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "ok",
+   "kind": "faithful",
+   "text": "Beyond three additional cameras, the benefit becomes smaller.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P13-1"
+   ]
+  },
+  {
+   "id": "D43",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "overclaim",
+   "text": "An optimized layout doubles the sky coverage of the Hungarian camera network.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states that an optimized 8-camera configuration achieves a 39.7% improvement, not doubling the sky coverage.",
+   "rule_flags": [],
+   "evidence": [
+    "P13-1"
+   ]
+  },
+  {
+   "id": "D44",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "contradiction",
+   "text": "Adding more cameras always keeps increasing coverage at the same rate.",
+   "verdict": "UNSUPPORTED",
+   "flagged": true,
+   "explanation": "The source states that adding more cameras yields diminishing returns rather than always increasing coverage at the same rate.",
+   "rule_flags": [],
+   "evidence": [
+    "P10-1",
+    "P13-1"
+   ]
+  },
+  {
+   "id": "D45",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "number_change",
+   "text": "The optimized 8-camera configuration achieved a 49.7% improvement.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states that the 9-camera optimized layout reaches a 41.8% improvement, not 49.7%.",
+   "rule_flags": [],
+   "evidence": [
+    "P13-1"
+   ]
+  },
+  {
+   "id": "D46",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "overgeneralisation",
+   "text": "The method was demonstrated on meteor camera networks across Europe.",
+   "verdict": "SUPPORTED",
+   "flagged": false,
+   "explanation": "",
+   "rule_flags": [],
+   "evidence": [
+    "P7-3"
+   ]
+  },
+  {
+   "id": "D47",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "certainty",
+   "text": "The reinforcement learning approach guarantees the best possible observatory location anywhere on Earth.",
+   "verdict": "EXAGGERATED",
+   "flagged": true,
+   "explanation": "The source states that the RL approach addresses complex placement tasks and can be extended, but does not claim it guarantees the best possible observatory location anywhere on Earth.",
+   "rule_flags": [],
+   "evidence": [
+    "P2-6"
+   ]
+  },
+  {
+   "id": "D48",
+   "paper": "Tardi_2026_PASP_138_044506.pdf",
+   "label": "wrong",
+   "kind": "invented",
+   "text": "The project was funded by the European Space Agency.",
+   "verdict": "UNSUPPORTED",
+   "flagged": true,
+   "explanation": "The source states the research was funded by the National Research, Development, and Innovation Office (NKFIH) and the Hungarian Academy of Sciences, not the European Space Agency.",
+   "rule_flags": [],
+   "evidence": [
+    "P14-3"
+   ]
+  }
+ ],
+ "statements": 48,
+ "distorted": 25,
+ "faithful": 23,
+ "recall": 0.88,
+ "precision": 1.0,
+ "false_alarm_rate": 0.0,
+ "accuracy": 0.9375,
+ "caught_as_wrong": 21,
+ "per_kind": {
+  "attribution": {
+   "caught": 1,
+   "total": 2
+  },
+  "certainty": {
+   "caught": 4,
+   "total": 4
+  },
+  "contradiction": {
+   "caught": 1,
+   "total": 1
+  },
+  "invented": {
+   "caught": 4,
+   "total": 4
+  },
+  "number_change": {
+   "caught": 5,
+   "total": 5
+  },
+  "overclaim": {
+   "caught": 2,
+   "total": 2
+  },
+  "overgeneralisation": {
+   "caught": 1,
+   "total": 3
+  },
+  "removed_limitation": {
+   "caught": 1,
+   "total": 1
+  },
+  "rounding": {
+   "caught": 2,
+   "total": 2
+  },
+  "simulation_as_real": {
+   "caught": 1,
+   "total": 1
+  }
+ }
+}

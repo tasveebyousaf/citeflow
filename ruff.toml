@@ -1,0 +1,14 @@
+# Code-quality checks (run: ruff check .)
+line-length = 130
+target-version = "py311"
+extend-exclude = ["data"]
+
+[lint]
+select = ["E", "F", "W", "B", "I", "UP", "SIM"]
+ignore = [
+  "E501",   # long lines: long UI strings read better on one line
+  "SIM105", # try/except/pass is clearer than contextlib.suppress for beginners
+  "SIM108", # ternary operators are not always clearer
+  "B008",
+  "SIM117", # nested `with` blocks mirror the page layout in Streamlit code
+]

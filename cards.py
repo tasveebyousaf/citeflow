@@ -1,6 +1,5 @@
 """Designed social images: single posts, carousels and short animated posts, in the CiteFlow palette.
 Every element can be revealed over time (t) so the same layout also renders as an animation."""
-import os
 
 import numpy as np
 from PIL import Image, ImageDraw
