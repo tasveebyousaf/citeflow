@@ -4,7 +4,10 @@
 
 CiteFlow turns a research paper into a press release, social posts for four platforms and a narrated video, and then checks every sentence against the source before anything is published.
 
-Built for the DEIK.AI Challenge 2026, category 2.C (AI-Assisted PR Content Generation), University of Debrecen.
+![Winner – DEIK.AI Challenge 2026](https://img.shields.io/badge/DEIK.AI_Challenge_2026-Winner-d4a017)
+![Tests](https://github.com/tasveebyousaf/citeflow/actions/workflows/tests.yml/badge.svg)
+
+🏆 **Winner of the DEIK.AI Challenge 2026** (category 2.C, AI-Assisted PR Content Generation), Faculty of Informatics, University of Debrecen. Presented live at the in-person final on 30 September 2026.
 
 ## Why
 
