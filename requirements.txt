@@ -1,5 +1,5 @@
 streamlit==1.64.0
-google-genai==2.25.0
+google-genai==2.27.0
 pymupdf==1.28.2
 pydantic==2.13.5
 pillow==11.3.0
