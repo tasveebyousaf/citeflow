@@ -6,4 +6,10 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    
+    ignore:
+      # The live app runs Python 3.11; numpy 2.5+ needs Python 3.12
+      - dependency-name: "numpy"
+        versions: [">=2.5"]
+      # MoviePy 2.2.1 requires pillow<12
+      - dependency-name: "pillow"
+        update-types: ["version-update:semver-major"]
