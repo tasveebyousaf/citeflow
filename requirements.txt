@@ -3,7 +3,7 @@ google-genai==2.25.0
 pymupdf==1.28.2
 pydantic==2.13.5
 pillow==11.3.0
-numpy==2.5.3
+numpy==2.4.4
 moviepy==2.2.1
 edge-tts==7.2.8
 psycopg[binary]==3.3.6
