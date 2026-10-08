@@ -51,8 +51,6 @@ The app has sign-in and sign-up, a **Studio** (create and review), **Projects** 
 - Privacy note with consent at sign-up; users can delete their account and all data on the Account page.
 - Dependencies pinned; Dependabot checks for security updates weekly.
 
-Full documentation: [`docs/CiteFlow_Documentation.pdf`](docs/CiteFlow_Documentation.pdf).
-
 ## Database (PostgreSQL)
 
 CiteFlow stores accounts, projects, uploaded papers and videos in **PostgreSQL** when `DATABASE_URL` is set in secrets, and in the local `data/` folder otherwise. Both backends offer the same functions (`store.py` chooses; `store_pg.py` is the PostgreSQL version), so the rest of the app is unchanged. Tables are created automatically on first start.
