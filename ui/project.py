@@ -185,5 +185,5 @@ def safe_recheck():
         recheck()
     except Exception as e:
         log_error("re-check", e)
-        st.session_state["recheck_error"] = str(e)
+        st.session_state["recheck_error"] = f"{type(e).__name__}: {e}"
     persist()

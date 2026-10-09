@@ -7,7 +7,7 @@ from PIL import Image
 
 import pipeline as pl
 import store
-from ui.core import allow, is_demo, limit, llm, log_error, ss, verify_now
+from ui.core import ai_problem, allow, is_demo, limit, llm, log_error, ss, verify_now
 from ui.i18n import choose, tr
 from ui.project import make_cards, persist
 from ui.results import results_view
@@ -81,10 +81,9 @@ def page_studio():
                 status.update(label=tr("Done"), state="complete")
         except Exception as e:
             log_error("create content", e)
-            msg = str(e)
-            if any(t in msg for t in pl.TRANSIENT):
-                st.warning(tr("Google's AI service is very busy right now. Please wait a minute and click "
-                           "**Create verified content** again."))
+            friendly = ai_problem(e, "click **Create verified content** again")
+            if friendly:
+                st.warning(friendly)
             else:
                 st.error(tr('Something went wrong: {0}').format(e))
 

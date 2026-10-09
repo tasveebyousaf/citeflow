@@ -159,16 +159,43 @@ def llm():
 
 
 def checker():
-    """The fact-checker: by default a different model than the writer (CHECKER_MODEL in secrets: auto, same or a name)."""
-    chain = pl.checker_chain(model_chain(GEMINI_KEY), secret("CHECKER_MODEL") or "auto")
+    """The fact-checker: a fixed, strong model (CHECKER_MODEL in secrets: auto, same or a model name).
+    Falls back only to other full models, never Lite or "latest" aliases. CHECKER_STRICT = "true" disables fallback."""
+    strict = (secret("CHECKER_STRICT") or "").lower() in {"1", "true", "yes"}
+    chain = pl.checker_chain(model_chain(GEMINI_KEY), secret("CHECKER_MODEL") or "auto", strict=strict)
     return pl.LLM(GEMINI_KEY, chain[0], fallbacks=chain[1:], on_call=monitor_hook())
+
+
+def ai_problem(error, action="try again"):
+    """A friendly message for known AI service problems, or None for other errors."""
+    if isinstance(error, pl.CreditsExhausted):
+        return tr("The AI credits for this app are used up. Please contact the administrator.")
+    if isinstance(error, pl.QuotaExhausted):
+        return tr("The AI usage limit has been reached for every available model. Please try again later.")
+    text = str(error)
+    if "CreditsExhausted" in text:
+        return tr("The AI credits for this app are used up. Please contact the administrator.")
+    if "QuotaExhausted" in text:
+        return tr("The AI usage limit has been reached for every available model. Please try again later.")
+    kind = pl.classify_error(text)
+    if kind == "credits":
+        return tr("The AI credits for this app are used up. Please contact the administrator.")
+    if kind in {"rate_limit", "daily_quota", "transient"}:
+        return tr("Google's AI service is busy right now. Please wait a minute and {0}.").format(tr(action))
+    return None
 
 
 def verify_now(items, writer=None):
     """Checks items with the independent checker and remembers which models wrote and checked."""
     chk = checker()
     results = pl.verify(chk, ss.passages, items)
-    ss.models = {"writer": getattr(writer, "model", None) or ss.get("models", {}).get("writer", ""), "checker": chk.model}
+    try:                                   # faithful rewrites, re-checked; a failure here never blocks the results
+        pl.rewrite_flagged(writer or llm(), chk, ss.passages, results)
+    except Exception as e:
+        log_error("faithful rewrite", e)
+    used = sorted({r.get("checked_by") for r in results if r.get("checked_by")})
+    ss.models = {"writer": getattr(writer, "model", None) or ss.get("models", {}).get("writer", ""),
+                 "checker": ", ".join(used) or chk.model}
     return results
 
 
@@ -237,6 +264,7 @@ html, body, [class*="css"], .stApp, button, input, textarea, select { font-famil
 button:focus-visible, a:focus-visible, [role="tab"]:focus-visible { outline:3px solid var(--gold) !important; outline-offset:2px; }
 .vp-legend { display:flex; gap:16px; font-size:13px; color:var(--muted); margin-top:4px; flex-wrap:wrap; }
 .vp-dot { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+.cf-type { display:inline-block; background:#f6ead0; color:#7a5a12; border-radius:999px; padding:2px 10px; font-size:12.5px; font-weight:700; margin:2px 4px 2px 0; }
 .vp-badge { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.06em; border-radius:5px; padding:3px 8px; text-transform:uppercase; }
 .b-SUPPORTED { color:#2f6450; background:#e7f1ec; } .b-EXAGGERATED { color:#8a5a00; background:#fbf0d8; }
 .b-UNSUPPORTED { color:#8f2f1b; background:#f8e3dc; } .b-NEEDS_REVIEW, .b-UNCHECKED { color:#7a5d0f; background:#f6f0da; }

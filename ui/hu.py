@@ -491,4 +491,54 @@ HU = {
         "Szo",
     "Sun":
         "V",
+    "The AI credits for this app are used up. Please contact the administrator.":
+        "Az alkalmazás MI-kerete elfogyott. Kérjük, forduljon az adminisztrátorhoz.",
+    "The AI usage limit has been reached for every available model. Please try again later.":
+        "Minden elérhető modell elérte a használati korlátot. Kérjük, próbálja újra később.",
+    "Google's AI service is busy right now. Please wait a minute and {0}.":
+        "A Google MI-szolgáltatása most túlterhelt. Kérjük, várjon egy percet, majd {0}.",
+    "try again":
+        "próbálja újra",
+    "click **Create verified content** again":
+        "kattintson újra az **Ellenőrzött tartalom készítése** gombra",
+    "send the feedback again":
+        "küldje el újra a visszajelzést",
+    "use **Edit and re-check**":
+        "használja a **Szerkesztés és újraellenőrzés** gombot",
+    "The change was applied, but the re-check could not run.":
+        "A módosítás megtörtént, de az újraellenőrzés nem futott le.",
+    "Re-check failed: {0}":
+        "Az újraellenőrzés nem sikerült: {0}",
+    "Correlation → causation":
+        "Összefüggés → ok-okozat",
+    "Subgroup → whole population":
+        "Alcsoport → teljes népesség",
+    "Preliminary → established":
+        "Előzetes → bizonyított",
+    "Finding → recommendation":
+        "Eredmény → ajánlás",
+    "Paper: {0} · Claim: {1}":
+        "Tanulmány: {0} · Állítás: {1}",
+    "no causal link":
+        "nincs ok-okozati kapcsolat",
+    "an association":
+        "összefüggés",
+    "cause and effect":
+        "ok-okozat",
+    "the studied group only":
+        "csak a vizsgált csoport",
+    "people in general":
+        "általában mindenki",
+    "a preliminary result":
+        "előzetes eredmény",
+    "an established fact":
+        "bizonyított tény",
+    "a finding":
+        "eredmény",
+    "a recommendation":
+        "ajánlás",
+    "Re-checked by the independent checker: supported by the paper.":
+        "A független ellenőrző újra ellenőrizte: a tanulmány alátámasztja.",
+    "The re-check did not confirm this version. Edit it before use.":
+        "Az újraellenőrzés nem erősítette meg ezt a változatot. Használat előtt szerkessze.",
 }

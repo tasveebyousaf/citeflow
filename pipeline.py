@@ -2,7 +2,9 @@
 import io
 import json
 import os
+import random
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -257,6 +259,17 @@ class Verdict(BaseModel):
     issue_type: str
     explanation: str
     suggested_rewrite: str
+    # Claim-type ratings: the same four scales for what the source says and for what the item says.
+    # Defaults are the lowest level on both sides, so a missing rating can never create a distortion.
+    evidence_causal: str = "none"
+    claim_causal: str = "none"
+    evidence_scope: str = "studied"
+    claim_scope: str = "studied"
+    evidence_certainty: str = "tentative"
+    claim_certainty: str = "tentative"
+    evidence_act: str = "finding"
+    claim_act: str = "finding"
+    distortion_types: list[str] = []
 
 
 class Report(BaseModel):
@@ -345,6 +358,55 @@ For each item return:
 - item_id: copy exactly.
 - verdict: one of SUPPORTED, EXAGGERATED, UNSUPPORTED, NOT_A_CLAIM
   SUPPORTED   = the source states this with the same strength.
+  EXAGGERATED = the source supports only a weaker or narrower version: causal language for non-causal results; subgroup, lab, animal or small-sample results presented as general; preliminary results presented as established; findings turned into advice; "assists" turned into "replaces/detects/cures"; certainty inflated ("proves", "breakthrough", "first"); important limitation removed; numbers rounded upward or misattributed.
+  UNSUPPORTED = not found in the source, or contradicts it.
+  NOT_A_CLAIM = no checkable factual content (hooks that only pose a question, greetings, placeholders, calls to action, hashtags, contact info).
+- evidence_ids: up to 3 passage ids (like P3-2). Empty only if nothing relevant exists.
+- issue_type: for EXAGGERATED/UNSUPPORTED a short label; otherwise "".
+- explanation: for EXAGGERATED/UNSUPPORTED one short sentence citing what the source actually says; for SUPPORTED and NOT_A_CLAIM leave it "".
+- suggested_rewrite: for EXAGGERATED/UNSUPPORTED a faithful replacement in the same language and tone (or "" if it should be deleted); otherwise "".
+
+CLAIM-TYPE RATINGS. For every item except NOT_A_CLAIM, rate the cited source passages (evidence_*) and the item
+(claim_*) on the same four scales. Rate the evidence by the strongest statement the source itself makes about this
+point; rate the item by what an ordinary reader would understand from it, including implications.
+- evidence_causal / claim_causal: "none" (describes something, no link between two things), "association"
+  (linked, associated, correlated, predicts, more/less likely, observational), "causal" (causes, leads to, reduces,
+  improves, prevents, increases, protects; or a randomised experiment showing an effect).
+  Results of a randomised controlled trial or a controlled experiment may be rated "causal" in the evidence.
+- evidence_scope / claim_scope: "studied" (limited to the group, sample, species, setting or condition that was
+  studied, or explicitly named), "general" (applies beyond it: people, everyone, patients, children, humans in general).
+  Rate the evidence "general" only if the source itself makes the general statement.
+- evidence_certainty / claim_certainty: "tentative" (pilot, small or early study, simulation, "may", "suggests",
+  "preliminary", "further research is needed"; or a claim that clearly frames the result as early or as one study's
+  finding), "definitive" (presented as proven, confirmed, settled, a definitive result, or a plain general fact).
+- evidence_act / claim_act: "finding" (reports what was observed), "recommendation" (tells people what they should
+  or must do, gives advice or policy).
+- distortion_types: the claim-type distortions you see, from exactly these codes (empty list if none):
+  "correlation_to_causation", "subgroup_to_population", "preliminary_to_established", "finding_to_recommendation".
+A claim may legitimately be weaker than the evidence; only a claim that is STRONGER than its evidence is a distortion.
+A recommendation is not a distortion if the source itself makes the same recommendation.
+
+Be strict: when in doubt between SUPPORTED and EXAGGERATED, choose EXAGGERATED. In particular:
+- Words of certainty ("proved", "proves", "shows for certain", "bizonyították", "bizonyítja") for empirical results are EXAGGERATED unless the source uses equally strong wording.
+- A result attributed to the wrong method, group or subset (e.g. a range that applies to all methods credited to one method) is EXAGGERATED.
+- Rounded or widened numbers ("11-15%" for "11.1-14.7%", "up to" added) are EXAGGERATED.
+- Write explanation in the same language as the item.
+
+{guard}
+ITEMS TO CHECK:
+{items}
+
+SOURCE DOCUMENT (numbered passages):
+{source}
+"""
+
+VERIFY_PROMPT_V1 = """You are an independent, strict fact-checker for a university press office.
+You did not write the text below. Check every item against the numbered source passages.
+
+For each item return:
+- item_id: copy exactly.
+- verdict: one of SUPPORTED, EXAGGERATED, UNSUPPORTED, NOT_A_CLAIM
+  SUPPORTED   = the source states this with the same strength.
   EXAGGERATED = the source supports only a weaker or narrower version: causal language for non-causal results; simulation, lab or small-sample results presented as real-world or general; "assists" turned into "replaces/detects/cures"; certainty inflated ("proves", "breakthrough", "first"); important limitation removed; numbers rounded upward or misattributed.
   UNSUPPORTED = not found in the source, or contradicts it.
   NOT_A_CLAIM = no checkable factual content (hooks that only pose a question, greetings, placeholders, calls to action, hashtags, contact info).
@@ -423,10 +485,66 @@ TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "INTERNAL
              "timed out", "Timeout", "Connection")
 
 
-class LLM:
-    """Gemini client: low thinking for speed, retries on temporary errors, fallback to other models."""
+class QuotaExhausted(RuntimeError):
+    """Every model has used up its quota for now (e.g. the free tier's daily limit)."""
 
-    def __init__(self, api_key: str, model: str, fallbacks: list[str] | None = None, on_call=None):
+
+class CreditsExhausted(RuntimeError):
+    """The prepaid AI credits are used up (HTTP 402). Affects every model, so there is no point in falling back."""
+
+
+EXHAUSTED_COOLDOWN = 3600       # seconds a model is skipped after a daily-quota error (checked again after that)
+_exhausted: dict[str, float] = {}
+_exhausted_lock = threading.Lock()
+
+
+def classify_error(msg: str) -> str:
+    """Sorts an API error into the action it needs:
+    credits (stop), daily_quota (skip this model), rate_limit (wait, then retry), not_found (skip model),
+    thinking (retry without the speed setting), transient (back off and retry) or fatal (raise)."""
+    if "402" in msg or "PAYMENT_REQUIRED" in msg or "prepayment credits" in msg.lower():
+        return "credits"
+    if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+        return "daily_quota" if re.search(r"per\s*day|PerDay", msg, re.I) else "rate_limit"
+    if "404" in msg or "NOT_FOUND" in msg:
+        return "not_found"
+    if "thinking" in msg.lower():
+        return "thinking"
+    if any(t in msg for t in TRANSIENT):
+        return "transient"
+    return "fatal"
+
+
+def retry_delay(msg: str) -> float | None:
+    """The wait Google suggests in a 429 error ('retryDelay': '37s' or 'retry in 37.2s'), in seconds."""
+    m = re.search(r"retryDelay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s", msg) or re.search(r"retry in (\d+(?:\.\d+)?)\s*s", msg, re.I)
+    return float(m.group(1)) if m else None
+
+
+def backoff(attempt: int, base: float = 2.0, cap: float = 20.0) -> float:
+    """Exponential backoff with jitter: about 2, 4, 8 … seconds plus up to 1 s of randomness, at most `cap`."""
+    return min(cap, base * 2 ** attempt) + random.uniform(0, 1)
+
+
+def mark_exhausted(model: str, now: float | None = None):
+    with _exhausted_lock:
+        _exhausted[model] = (now or time.time()) + EXHAUSTED_COOLDOWN
+
+
+def is_exhausted(model: str, now: float | None = None) -> bool:
+    with _exhausted_lock:
+        until = _exhausted.get(model)
+        if until and (now or time.time()) >= until:
+            _exhausted.pop(model, None)
+            return False
+        return bool(until)
+
+
+class LLM:
+    """Gemini client: low thinking for speed, quota-aware retries, fallback to other models."""
+
+    def __init__(self, api_key: str, model: str, fallbacks: list[str] | None = None, on_call=None,
+                 sleep=time.sleep):
         from google import genai
         self.client = genai.Client(api_key=api_key)
         self.models = [model] + [m for m in (fallbacks or []) if m != model]
@@ -436,6 +554,13 @@ class LLM:
         self.last_usage = {}
         self.log: list[str] = []
         self.on_call = on_call            # monitoring hook: called with one dict per API attempt
+        self.sleep = sleep                # replaceable in tests
+        self._local = threading.local()   # the model that answered, per worker thread
+
+    @property
+    def last_model(self) -> str:
+        """The model that answered the most recent call made from this thread."""
+        return getattr(self._local, "model", "") or self.model
 
     def _emit(self, model, schema, ok, error, started):
         if not self.on_call:
@@ -478,37 +603,59 @@ class LLM:
         self.fast = fast
         deadline = time.time() + 150            # keep trying busy models for up to ~2.5 minutes
         for _ in range(2):                      # two passes over all models
-            for model in self.models:
+            available = [m for m in self.models if not is_exhausted(m)]
+            if not available:
+                break
+            for model in available:
                 out = self._try_model(model, prompt, schema, temperature, deadline)
                 if out is not None:
                     return out
                 if time.time() > deadline:
                     break
+            if time.time() > deadline:
+                break
+        if all(is_exhausted(m) for m in self.models):
+            raise QuotaExhausted("The AI usage limit has been reached for every available model. "
+                                 "Please try again later.")
         raise self.last_error or RuntimeError("All models are busy")
 
     def _try_model(self, model, prompt, schema, temperature, deadline):
         attempt = 0
-        while attempt < 2 and time.time() < deadline:
+        while attempt < 3 and time.time() < deadline:
+            if is_exhausted(model):
+                return None
             started = time.time()
             try:
                 out = self._once(model, prompt, schema, temperature)
                 self.model = model
+                self._local.model = model
                 self._emit(model, schema, True, "", started)
                 return out
             except Exception as e:
                 self.last_error, msg = e, str(e)
                 self._emit(model, schema, False, f"{type(e).__name__}: {msg}", started)
-                if self.fast and "thinking" in msg.lower():
+                kind = classify_error(msg)
+                if kind == "credits":
+                    raise CreditsExhausted("The AI credits are used up. Please contact the administrator.") from e
+                if kind == "thinking" and self.fast:
                     self.fast = False          # model does not accept the speed setting
                     continue
-                if "404" in msg or "NOT_FOUND" in msg:
+                if kind == "not_found":
                     self.log.append(f"{model}: not available")
                     return None
-                if not any(t in msg for t in TRANSIENT):
+                if kind == "daily_quota":
+                    mark_exhausted(model)      # no retries: a daily limit will not clear in seconds
+                    self.log.append(f"{model}: daily limit reached, skipped")
+                    return None
+                if kind not in ("rate_limit", "transient"):
                     raise
+                wait = retry_delay(msg) if kind == "rate_limit" else None
+                wait = backoff(attempt) if wait is None else min(wait + random.uniform(0, 1), 60)
                 attempt += 1
-                self.log.append(f"{model}: busy, retry {attempt}")
-                time.sleep(3 * attempt)
+                if attempt >= 3 or time.time() + wait > deadline:
+                    break
+                self.log.append(f"{model}: {kind.replace('_', ' ')}, retry {attempt} in {wait:.0f}s")
+                self.sleep(wait)
         return None
 
 
@@ -527,7 +674,7 @@ def list_flash_models(api_key: str) -> list[str]:
         name = m.name.replace("models/", "")
         actions = getattr(m, "supported_actions", None) or []
         if "generateContent" in actions and "gemini" in name and "flash" in name \
-                and not any(x in name for x in ("tts", "image", "live", "audio", "embedding", "robotics")):
+                and not any(x in name for x in ("tts", "image", "live", "audio", "embedding", "robotics", "omni")):
             names.append(name)
     return sorted(set(names), key=rank_model, reverse=True)
 
@@ -552,20 +699,23 @@ def model_chain(api_key: str, found: list[str] | None = None) -> list[str]:
     return (full + lite + ["gemini-flash-latest", "gemini-flash-lite-latest"])[:7]
 
 
-def checker_chain(chain: list[str], setting: str = "auto") -> list[str]:
-    """Models for the fact-checker.
-    'auto'  = a different full model than the writer (independent second opinion), falling back to the others;
-    'same'  = the writer's model;
-    a model name (e.g. 'gemini-2.5-pro') = that model first."""
+def checker_chain(chain: list[str], setting: str = "auto", strict: bool = False) -> list[str]:
+    """Models for the fact-checker. The checker never falls back to a weaker (Lite) model or a moving 'latest' alias.
+    'auto'  = a different full model than the writer (independent second opinion), then the other full models;
+    'same'  = the writer's model first;
+    a model name (e.g. 'gemini-2.5-pro') = that model first.
+    strict  = only the first model, no fallback at all (used for evaluations, so every verdict comes from one model)."""
     setting = (setting or "auto").strip()
+    full = [m for m in chain if "lite" not in m and "latest" not in m] or list(chain)
     if setting == "same":
-        return list(chain)
-    if setting != "auto":
-        return [setting] + [m for m in chain if m != setting]
-    alt = [m for m in chain[1:] if "lite" not in m and "latest" not in m]
-    if not alt:
-        return list(chain)
-    return [alt[0]] + [m for m in chain if m != alt[0]]
+        ordered = [chain[0]] + [m for m in full if m != chain[0]]
+    elif setting != "auto":
+        ordered = [setting] + [m for m in full if m != setting]
+    else:
+        alt = [m for m in full[1:]] if len(full) > 1 else []
+        ordered = [alt[0]] + [m for m in full if m != alt[0]] if alt else list(full)
+    return ordered[:1] if strict else ordered
+
 
 # ---------------------------------------------------------------- steps
 
@@ -692,54 +842,264 @@ def number_check(claim: str, evidence_text: str) -> list[str]:
     return [n for n in NUM_RE.findall(claim) if _norm_num(n) not in ev]
 
 
-def _verify_chunk(llm: LLM, source: str, items: list[dict]):
+# ---------------------------------------------------------------- claim-type aware overclaim detection
+
+# Each scale from weakest to strongest. The AI rates evidence and claim; code compares the two ratings.
+SCALES = {
+    "causal": ("none", "association", "causal"),
+    "scope": ("studied", "general"),
+    "certainty": ("tentative", "definitive"),
+    "act": ("finding", "recommendation"),
+}
+DISTORTION_OF = {
+    "causal": "correlation_to_causation",
+    "scope": "subgroup_to_population",
+    "certainty": "preliminary_to_established",
+    "act": "finding_to_recommendation",
+}
+DISTORTIONS = tuple(DISTORTION_OF.values())
+DISTORTION_LABELS = {
+    "correlation_to_causation": "Correlation → causation",
+    "subgroup_to_population": "Subgroup → whole population",
+    "preliminary_to_established": "Preliminary → established",
+    "finding_to_recommendation": "Finding → recommendation",
+}
+LEVEL_WORDS = {
+    "none": "no causal link", "association": "an association", "causal": "cause and effect",
+    "studied": "the studied group only", "general": "people in general",
+    "tentative": "a preliminary result", "definitive": "an established fact",
+    "finding": "a finding", "recommendation": "a recommendation",
+}
+# What a faithful rewrite must say on a scale (used to brief the writer).
+TARGETS = {
+    ("causal", "none"): "describe the result without any link or effect",
+    ("causal", "association"): "an association only (e.g. 'was linked to', 'was associated with'), no cause-and-effect verbs",
+    ("scope", "studied"): "limit it to the group that was studied (name it)",
+    ("certainty", "tentative"): "present it as an early or preliminary result, as the source does",
+    ("act", "finding"): "report the finding only, give no advice",
+}
+# Wording cues: a safety net that can only ask for human review, never decide a type on its own.
+CUES = {
+    # verbs only: "lower", "reduced" or "improved" also appear as adjectives in associational findings
+    "causal": r"\b(causes?|caused|leads? to|led to|reduces|lowers|boosts?|improves|prevents?|prevented|protects?"
+              r"|cuts|results? in|makes? (you|people))\b",
+    "certainty": r"\b(prove[sdn]?|proof|confirm(s|ed)?|definitive(ly)?|conclusive(ly)?|establish(es|ed)|certain(ly)?"
+                 r"|guarantee[sd]?|settled|no doubt)\b",
+    "act": r"\b(should|must|need to|needs to|ought to|recommend(s|ed)?|advise[sd]?|it is best to)\b",
+    "scope": r"\b(everyone|everybody|all people|anyone|humans|the general population|worldwide|universal(ly)?)\b",
+}
+
+
+def _level(scale: str, value) -> str | None:
+    v = str(value or "").strip().lower()
+    return v if v in SCALES[scale] else None
+
+
+def claim_levels(v) -> dict:
+    """{scale: [evidence level, claim level]}; unknown ratings become None."""
+    return {sc: [_level(sc, getattr(v, f"evidence_{sc}", None)), _level(sc, getattr(v, f"claim_{sc}", None))]
+            for sc in SCALES}
+
+
+def compare_levels(levels: dict) -> list[str]:
+    """The distortion types where the claim is stronger than its evidence."""
+    out = []
+    for sc, (ev, cl) in levels.items():
+        if ev is None or cl is None:
+            continue
+        rank = SCALES[sc]
+        if sc == "causal":
+            stronger = cl == "causal" and ev != "causal"
+        else:
+            stronger = rank.index(cl) > rank.index(ev)
+        if stronger:
+            out.append(DISTORTION_OF[sc])
+    return out
+
+
+def normalise_types(types) -> list[str]:
+    out = []
+    for t in types or []:
+        t = str(t).strip().lower().replace(" ", "_").replace("-", "_")
+        if t in DISTORTIONS and t not in out:
+            out.append(t)
+    return out
+
+
+def cue_types(claim: str, evidence_text: str) -> list[str]:
+    """Distortion types whose wording appears in the claim but not anywhere in its evidence."""
+    out = []
+    for sc, pattern in CUES.items():
+        found = re.search(pattern, claim, re.I)
+        if found and not re.search(pattern, evidence_text, re.I):
+            out.append((DISTORTION_OF[sc], found.group(0)))
+    return out
+
+
+def explain_levels(levels: dict, types: list[str]) -> str:
+    parts = []
+    for sc, (ev, cl) in levels.items():
+        if DISTORTION_OF[sc] in types:
+            parts.append(f"The source reports {LEVEL_WORDS[ev]}; the claim presents {LEVEL_WORDS[cl]}.")
+    return " ".join(parts)
+
+
+def _verify_chunk(llm: LLM, source: str, items: list[dict], prompt: str | None = None):
     item_block = "\n".join(f"[{it['id']}] {it['text']}" for it in items)
-    return llm.json_call(VERIFY_PROMPT.format(guard=UNTRUSTED, items=item_block, source=source), Report, 0.0, fast=False).items
+    report = llm.json_call((prompt or VERIFY_PROMPT).format(guard=UNTRUSTED, items=item_block, source=source),
+                           Report, 0.0, fast=False)
+    return [(v, llm.last_model) for v in report.items]
 
 
-def verify(llm: LLM, passages, items: list[dict]) -> list[dict]:
-    """Checks items in parallel groups (release / posts / video) for speed."""
+def verify(llm: LLM, passages, items: list[dict], cues: bool = True, prompt: str | None = None) -> list[dict]:
+    """Checks items in parallel groups (release / posts / video) for speed.
+    The AI gives a verdict and rates evidence and claim on four scales; code compares the ratings, so a claim that is
+    stronger than its evidence is always flagged with its distortion type. Wording cues can only add "needs review"."""
     source = passages_block(passages)
     n = max(1, min(5, (len(items) + 7) // 8))           # up to 5 small batches checked in parallel
     size = (len(items) + n - 1) // n
     groups = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
     verdicts = []
     with ThreadPoolExecutor(max_workers=len(groups)) as ex:
-        for part in ex.map(lambda g: _verify_chunk(llm, source, g) if g else [], groups):
+        for part in ex.map(lambda g: _verify_chunk(llm, source, g, prompt) if g else [], groups):
             verdicts.extend(part)
-    by_id = {v.item_id.strip("[] "): v for v in verdicts}
+    by_id = {v.item_id.strip("[] "): (v, model) for v, model in verdicts}
     pmap = {p.pid: p for p in passages}
     results = []
     for it in items:
-        v = by_id.get(it["id"])
+        v, model = by_id.get(it["id"], (None, ""))
         r = dict(it)
         if v is None:
             r.update(verdict="UNCHECKED", evidence=[], issue_type="not checked",
-                     explanation="The checker returned no verdict for this item.", rewrite="", rule_flags=[])
+                     explanation="The checker returned no verdict for this item.", rewrite="", rule_flags=[], checked_by="",
+                     ai_verdict="UNCHECKED", levels={}, distortions=[], ai_types=[], cue_types=[], types=[])
             results.append(r)
             continue
         verdict = v.verdict.strip().upper().replace(" ", "_")
         if verdict not in {"SUPPORTED", "EXAGGERATED", "UNSUPPORTED", "NOT_A_CLAIM"}:
             verdict = "UNCHECKED"
+        ai_verdict = verdict
         ev = [pmap[e.strip("[] ")] for e in v.evidence_ids if e.strip("[] ") in pmap]
-        flags = []
+        ev_text = " ".join(p.text for p in ev)
+        levels = claim_levels(v) if verdict != "NOT_A_CLAIM" else {}
+        distortions = compare_levels(levels)
+        cues_found = cue_types(it["text"], ev_text) if ev and verdict != "NOT_A_CLAIM" else []
+        issue, explanation, types, flags = v.issue_type, v.explanation, [], []
+        # Type layer: a claim rated stronger than its evidence is a distortion, whatever the verdict said.
+        if distortions and verdict in {"SUPPORTED", "EXAGGERATED"}:
+            verdict, types = "EXAGGERATED", distortions
+            issue = "; ".join(DISTORTION_LABELS[t] for t in distortions)
+            explanation = explanation or explain_levels(levels, distortions)
+        elif verdict in WRONG:
+            types = distortions
         # Rule layer: the AI proposes, deterministic rules double-check.
         if verdict == "SUPPORTED" and not ev:
             flags.append("no valid source passage cited")
         if verdict == "SUPPORTED" and ev:
-            missing = number_check(it["text"], " ".join(p.text for p in ev))
+            missing = number_check(it["text"], ev_text)
             if missing:
                 flags.append("number(s) not found in cited passages: " + ", ".join(missing))
+            if cues:
+                for t, word in cues_found:
+                    flags.append(f"possible {DISTORTION_LABELS[t].lower()}: the claim says '{word}', the cited passages do not")
+                    types.append(t)
         if flags and verdict == "SUPPORTED":
             verdict = "NEEDS_REVIEW"
-        r.update(verdict=verdict, evidence=ev, issue_type=v.issue_type, explanation=v.explanation,
-                 rewrite=v.suggested_rewrite, rule_flags=flags)
+        r.update(verdict=verdict, evidence=ev, issue_type=issue, explanation=explanation,
+                 rewrite=v.suggested_rewrite, rule_flags=flags, checked_by=model,
+                 ai_verdict=ai_verdict, levels=levels, distortions=distortions,
+                 ai_types=normalise_types(v.distortion_types), cue_types=[t for t, _ in cues_found], types=types)
         results.append(r)
     return results
 
 
 FLAGGED = {"EXAGGERATED", "UNSUPPORTED", "NEEDS_REVIEW", "UNCHECKED"}
 WRONG = {"EXAGGERATED", "UNSUPPORTED"}
+
+
+class RewriteItem(BaseModel):
+    item_id: str
+    text: str
+
+
+class Rewrites(BaseModel):
+    items: list[RewriteItem]
+
+
+REWRITE_PROMPT = """You are a careful science writer. Each item below is a sentence that overstates its source evidence.
+Rewrite each one so it says exactly what the evidence supports: the same causal strength, the same scope, the same
+certainty, and advice only if the evidence itself gives that advice. Not stronger, and not weaker either:
+do not add hedges, caveats or limits that the evidence does not have, and keep everything that was already correct
+(numbers exactly as in the evidence, names, groups, tone, language). Keep it about as long as the original and
+readable for the public. Never mention "the source", "the evidence" or "the paper says".
+Return item_id and text for every item.
+
+{guard}
+{items}
+"""
+
+
+def _rewrite_brief(r: dict, feedback: str = "") -> str:
+    lines = [f"[{r['id']}] ORIGINAL: {r['text']}",
+             "EVIDENCE: " + " ".join(p.text for p in r.get("evidence", []))]
+    for sc, (ev, _cl) in (r.get("levels") or {}).items():
+        if DISTORTION_OF[sc] in (r.get("types") or []) and ev and (sc, ev) in TARGETS:
+            lines.append(f"FIX ({DISTORTION_LABELS[DISTORTION_OF[sc]]}): {TARGETS[(sc, ev)]}")
+    if r.get("explanation"):
+        lines.append("PROBLEM: " + r["explanation"])
+    if feedback:
+        lines.append("YOUR PREVIOUS REWRITE WAS STILL REJECTED: " + feedback)
+    return "\n".join(lines)
+
+
+def strength_kept(original: dict, check: dict) -> bool | None:
+    """True if the rewrite sits exactly at the evidence's level where the original overstated it, and keeps the
+    original's level elsewhere (no needless weakening). None if the ratings are incomplete."""
+    lv, new = original.get("levels") or {}, check.get("levels") or {}
+    if not lv or not new:
+        return None
+    for sc, (ev, cl) in lv.items():
+        got = (new.get(sc) or [None, None])[1]
+        if ev is None or cl is None or got is None:
+            return None
+        rank = SCALES[sc]
+        target = ev if DISTORTION_OF[sc] in compare_levels({sc: [ev, cl]}) else cl
+        if rank.index(got) != rank.index(target):
+            return False
+    return True
+
+
+def rewrite_flagged(writer: LLM, checker: LLM, passages, results: list[dict], rounds: int = 2,
+                    cues: bool = True) -> list[dict]:
+    """Faithful rewrites for flagged claims: the writer rewrites each claim to its evidence's level, the independent
+    checker re-checks the rewrite, and a rejected rewrite gets one more attempt with the checker's feedback.
+    Adds rewrite, rewrite_verified, rewrite_strength_kept, rewrite_rounds and rewrite_by to each fixed result."""
+    todo = [r for r in results if r.get("verdict") in WRONG | {"NEEDS_REVIEW"} and r.get("evidence")
+            and (r.get("types") or r.get("verdict") == "EXAGGERATED")]
+    feedback = {}
+    for round_no in range(1, rounds + 1):
+        if not todo:
+            break
+        brief = "\n\n".join(_rewrite_brief(r, feedback.get(r["id"], "")) for r in todo)
+        out = writer.json_call(REWRITE_PROMPT.format(guard=UNTRUSTED, items=brief), Rewrites, 0.3)
+        texts = {x.item_id.strip("[] "): x.text.strip() for x in out.items if x.text.strip()}
+        recheck = [{"id": r["id"], "part": r.get("part", ""), "text": texts[r["id"]]} for r in todo if r["id"] in texts]
+        checked = {c["id"]: c for c in verify(checker, passages, recheck, cues=cues)} if recheck else {}
+        failed = []
+        for r in todo:
+            c = checked.get(r["id"])
+            if c is None:
+                continue
+            ok = c["verdict"] == "SUPPORTED"
+            r.update(rewrite=c["text"], rewrite_verified=ok, rewrite_strength_kept=strength_kept(r, c),
+                     rewrite_rounds=round_no, rewrite_by=getattr(writer, "last_model", ""),
+                     rewrite_check={"verdict": c["verdict"], "explanation": c.get("explanation", ""),
+                                    "types": c.get("types", []), "levels": c.get("levels", {})})
+            if not ok:
+                feedback[r["id"]] = c.get("explanation") or "; ".join(c.get("rule_flags", [])) or c["verdict"]
+                failed.append(r)
+        todo = failed
+    return results
 
 
 def score(results: list[dict]) -> tuple[int, int]:

@@ -14,7 +14,7 @@ import streamlit as st
 import cards
 import pipeline as pl
 import video as vid
-from ui.core import HERE, PEXELS_KEY, allow, badge, checker, donut, img_bytes, llm, log_error, ss, verify_now
+from ui.core import HERE, PEXELS_KEY, ai_problem, allow, badge, checker, donut, img_bytes, llm, log_error, ss, verify_now
 from ui.i18n import choose, tr
 from ui.project import (
     POST_OF,
@@ -240,9 +240,8 @@ def refine_view():
                 apply_feedback(fb, "Everything" if quick else target)
             except Exception as e:
                 log_error("rework content", e)
-                busy = any(t in str(e) for t in pl.TRANSIENT)
-                ss.chat.append({"role": "assistant", "content": tr("Google's AI service is busy right now. Please send the feedback again in a minute.")
-                                if busy else tr("Sorry, that did not work: {0}").format(e)})
+                friendly = ai_problem(e, "send the feedback again")
+                ss.chat.append({"role": "assistant", "content": friendly or tr("Sorry, that did not work: {0}").format(e)})
         persist()
         st.rerun()
 
@@ -360,6 +359,20 @@ def anim_body(key, card, c):
 
 
 @st.fragment
+def types_view(r):
+    """Distortion type chips with the evidence level next to the claim level, e.g. Paper: an association · Claim: cause and effect."""
+    types = r.get("types") or []
+    if not types:
+        return
+    chips = " ".join(f"<span class='cf-type'>{html.escape(tr(pl.DISTORTION_LABELS.get(t, t)))}</span>" for t in types)
+    rows = []
+    for sc, (ev, cl) in (r.get("levels") or {}).items():
+        if pl.DISTORTION_OF[sc] in types and ev and cl:
+            rows.append(tr("Paper: {0} · Claim: {1}").format(tr(pl.LEVEL_WORDS[ev]), tr(pl.LEVEL_WORDS[cl])))
+    st.markdown(chips + "".join(f"<div style='font-size:13px;color:#5f6b66;margin-top:4px'>{html.escape(x)}</div>" for x in rows),
+                unsafe_allow_html=True)
+
+
 def fact_check_view(flagged):
     """Runs on its own: switching filters or opening page views does not reload the whole page."""
     res = ss.results
@@ -379,6 +392,7 @@ def fact_check_view(flagged):
             st.markdown(tr("{0} <span style='color:#5f6b66;font-size:13px'>&nbsp;{1} · {2}</span>").format(badge(r['verdict']), tr(r['part']), r['id']),
                         unsafe_allow_html=True)
             st.markdown(f"**{html.escape(r['text'])}**")
+            types_view(r)
             if r.get("explanation"):
                 st.caption((r["issue_type"].capitalize() + " — " if r.get("issue_type") else "") + r["explanation"])
             for f in r.get("rule_flags", []):
@@ -386,6 +400,10 @@ def fact_check_view(flagged):
             if r.get("rewrite"):
                 st.markdown(tr("<div class='vp-quote'><b>Faithful version:</b> {0}</div>").format(html.escape(r['rewrite'])),
                             unsafe_allow_html=True)
+                if r.get("rewrite_verified") is True:
+                    st.caption("✓ " + tr("Re-checked by the independent checker: supported by the paper."))
+                elif r.get("rewrite_verified") is False:
+                    st.caption("⚠ " + tr("The re-check did not confirm this version. Edit it before use."))
             for p in r["evidence"]:
                 st.markdown(tr("<div class='vp-quote'><b>Paper, p. {0}</b> · {1}</div>").format(p.page, html.escape(p.text[:600])),
                             unsafe_allow_html=True)
@@ -430,8 +448,8 @@ def results_view():
 
     if ss.get("recheck_error"):
         err = ss.pop("recheck_error")
-        st.warning("The change was applied, but the re-check could not run because Google's AI service is busy. "
-                   "Use **Edit and re-check** in a minute." if any(t in err for t in pl.TRANSIENT) else f"Re-check failed: {err}")
+        friendly = ai_problem(RuntimeError(err), "use **Edit and re-check**")
+        st.warning(tr("The change was applied, but the re-check could not run.") + " " + (friendly or tr("Re-check failed: {0}").format(err)))
     t_rel, t_soc, t_vid, t_ref, t_chk, t_str, t_exp = st.tabs(
         [tr("Press release"), tr("Social posts"), tr("Video"), tr("Refine with feedback"), tr("Fact check"), tr("Stress test"), tr("Approve & export")])
 
