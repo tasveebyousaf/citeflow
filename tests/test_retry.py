@@ -29,6 +29,8 @@ CREDITS = "402 PAYMENT_REQUIRED. Your prepayment credits are depleted."
     ("503 UNAVAILABLE. The model is overloaded", "transient"),
     ("500 INTERNAL", "transient"),
     ("400 INVALID_ARGUMENT. API key not valid", "fatal"),
+    ("RemoteProtocolError: Server disconnected without sending a response.", "transient"),
+    ("ConnectError: [Errno 11001] getaddrinfo failed", "transient"),
 ])
 def test_classify_error(msg, kind):
     assert pl.classify_error(msg) == kind
@@ -158,3 +160,32 @@ def test_real_model_list_gives_sensible_chains(monkeypatch):
     assert chk[0] == "gemini-3.1-pro-preview"
     assert not any("lite" in m or "latest" in m for m in chk)
     assert pl.checker_chain(writer, "gemini-3.1-pro-preview", strict=True) == ["gemini-3.1-pro-preview"]
+
+
+def test_writer_never_uses_the_fixed_checker_model():
+    chain = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+    assert pl.writer_chain(chain, "gemini-3.8-flash")[0] == "gemini-3.7-flash"
+    assert "gemini-3.8-flash" not in pl.writer_chain(chain, "gemini-3.8-flash")
+    assert pl.writer_chain(chain, "auto") == chain
+    assert pl.writer_chain(["only"], "only") == ["only"]                  # never left without a model
+
+
+def test_dropped_connection_is_retried():
+    class RemoteProtocolError(Exception):
+        pass
+
+    waits, calls = [], {"n": 0}
+    llm = REAL_LLM("test-key", "a", fallbacks=[], sleep=waits.append)
+
+    def once(model, prompt, schema, temperature):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RemoteProtocolError("Server disconnected without sending a response.")
+        return "answer"
+
+    llm._once = once
+    assert llm.json_call("p", Schema) == "answer" and len(waits) == 1
+
+
+def test_server_deadline_is_retried():
+    assert pl.classify_error("504 DEADLINE_EXCEEDED. Deadline expired before operation could complete.") == "transient"

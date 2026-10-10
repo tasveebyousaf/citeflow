@@ -191,3 +191,102 @@ def test_checker_is_independent_model(user_app, pdf_bytes):
 def test_privacy_note_states_retention(app_path):
     at = new_app(app_path)
     assert any("365 days" in m.value and "14 days" in m.value for m in at.markdown)
+
+
+# ------------------------------------------------------------------ claim-type distortions in the interface
+
+def typed_flag(at):
+    """Turns the first flagged result into a typed correlation -> causation distortion without a rewrite."""
+    r = next(r for r in at.session_state["results"] if r["verdict"] in pl.FLAGGED)
+    r.update(types=["correlation_to_causation"], rewrite="", rewrite_verified=None,
+             levels={"causal": ["association", "causal"], "scope": ["studied", "studied"],
+                     "certainty": ["tentative", "tentative"], "act": ["finding", "finding"]})
+    return r
+
+
+def test_flagged_sentence_shows_type_and_levels(user_app, pdf_bytes):
+    at = seed_project(user_app, pdf_bytes)
+    typed_flag(at)
+    run(at)
+    shown = " ".join(m.value for m in at.markdown)
+    assert "Distortion type" in shown and "Correlation → causation" in shown
+    assert "Paper: an association" in shown and "Claim: cause and effect" in shown
+
+
+def test_write_faithful_version_on_demand(user_app, pdf_bytes):
+    at = seed_project(user_app, pdf_bytes)
+    r = typed_flag(at)
+    run(at)
+    click(at, "Write faithful version")
+    fixed = next(x for x in at.session_state["results"] if x["id"] == r["id"])
+    assert fixed["rewrite"] and fixed["rewrite_verified"] is True
+    assert any("Re-checked by the independent checker" in c.value for c in at.caption)
+    click(at, "Use faithful version")
+    assert fixed["rewrite"] in at.session_state["release"] or r["part"] != "Press release"
+
+
+def test_stress_test_lists_distortions_with_fixes(user_app, pdf_bytes):
+    at = seed_project(user_app, pdf_bytes)
+    click(at, "Run stress test")
+    hyped, hres = at.session_state["hype"]
+    assert any(r["verdict"] in pl.FLAGGED for r in hres)
+    assert any("What the checker found" in m.value for m in at.markdown)
+
+
+def test_every_flag_gets_a_label():
+    from ui.results import distortion_label
+    assert distortion_label({"verdict": "EXAGGERATED", "types": ["finding_to_recommendation"]}) == \
+        ("Measured outcome → recommendation", True)
+    assert distortion_label({"verdict": "UNSUPPORTED", "issue_type": "not in source"})[0] == "Not in the paper → stated as fact"
+    assert distortion_label({"verdict": "NEEDS_REVIEW", "rule_flags": ["number(s) not found in cited passages: 15%"]})[0] == \
+        "Exact figure → altered figure"
+    assert distortion_label({"verdict": "EXAGGERATED", "issue_type": "removed limitation"})[0] == "Qualified result → caveat removed"
+    assert distortion_label({"verdict": "EXAGGERATED", "explanation": "The paper does not call it a breakthrough."})[0] == \
+        "Measured result → hyped"
+    assert distortion_label({"verdict": "EXAGGERATED"}) == ("Supported strength → overstated", False)
+    assert distortion_label({"verdict": "UNCHECKED"})[0] == "Not checked → check again"
+
+
+def test_remove_and_edit_recheck_run_before_the_page_is_drawn(user_app, pdf_bytes):
+    import fake_llm
+    at = seed_project(user_app, pdf_bytes)
+    bad = "The system proves that AI can replace experts."
+    assert bad in flagged(at)
+    target = next(r for r in at.session_state["results"] if r["text"] == bad)
+    [b for b in at.button if b.key == f"rm_{target['id']}"][0].click()
+    run(at)
+    assert bad not in at.session_state["release"] and bad not in flagged(at)
+    assert "pending_action" not in at.session_state
+    fake_llm.FakeLLM.calls.clear()
+    [t for t in at.text_area if t.label == "Press release"][0].input(at.session_state["release"] + " It cures cancer.")
+    click(at, "Re-check my edits")
+    assert "It cures cancer." in at.session_state["release"]
+    assert any(n == "Report" for n, _ in fake_llm.FakeLLM.calls)              # checked again
+
+
+def test_verified_faithful_version_is_used_without_checking_again(user_app, pdf_bytes):
+    import fake_llm
+    at = seed_project(user_app, pdf_bytes)
+    r = next(x for x in at.session_state["results"] if x["verdict"] in pl.FLAGGED and x["part"] == "Press release")
+    good = "The team built a screening system designed to assist cytology experts."
+    r.update(rewrite=good, rewrite_verified=True, rewrite_check={"verdict": "SUPPORTED", "levels": {}})
+    run(at)
+    fake_llm.FakeLLM.calls.clear()
+    [b for b in at.button if b.key == f"fix_{r['id']}"][0].click()
+    run(at)
+    assert good in at.session_state["release"]
+    fixed = next(x for x in at.session_state["results"] if x["id"] == r["id"])
+    assert fixed["verdict"] == "SUPPORTED" and fixed["text"] == good
+    assert not fake_llm.FakeLLM.calls                                     # no AI calls: instant
+
+
+def test_unverified_faithful_version_is_still_checked(user_app, pdf_bytes):
+    import fake_llm
+    at = seed_project(user_app, pdf_bytes)
+    r = next(x for x in at.session_state["results"] if x["verdict"] in pl.FLAGGED and x["part"] == "Press release")
+    r.update(rewrite="The system is designed to assist experts.", rewrite_verified=False)
+    run(at)
+    fake_llm.FakeLLM.calls.clear()
+    [b for b in at.button if b.key == f"fix_{r['id']}"][0].click()
+    run(at)
+    assert any(n == "Report" for n, _ in fake_llm.FakeLLM.calls)          # checked again

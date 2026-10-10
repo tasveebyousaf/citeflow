@@ -73,15 +73,25 @@ def test_faithful_rewrite_is_rechecked_and_keeps_strength():
     assert r["rewrite_verified"] is True and r["rewrite_strength_kept"] is True and r["rewrite_rounds"] == 1
 
 
-def test_strength_kept_rejects_needless_weakening():
-    original = {"levels": levels(causal=["association", "causal"], scope=["general", "general"])}
-    ok = {"levels": levels(causal=["association", "association"], scope=["general", "general"])}
-    too_weak = {"levels": levels(causal=["association", "association"], scope=["general", "studied"])}
-    still_causal = {"levels": levels(causal=["association", "causal"], scope=["general", "general"])}
-    assert pl.strength_kept(original, ok) is True
+def test_strength_kept_compares_within_the_recheck():
+    original = {"types": ["correlation_to_causation"]}
+    exact = {"levels": levels(causal=["association", "association"])}
+    too_weak = {"levels": levels(causal=["association", "none"])}
+    still_causal = {"levels": levels(causal=["association", "causal"])}
+    assert pl.strength_kept(original, exact) is True
     assert pl.strength_kept(original, too_weak) is False
     assert pl.strength_kept(original, still_causal) is False
     assert pl.strength_kept(original, {"levels": {}}) is None
+    assert pl.strength_kept({"types": []}, exact) is None
+
+
+def test_main_type_prefers_the_confirmed_ai_choice():
+    both = ["correlation_to_causation", "finding_to_recommendation"]
+    assert pl.main_first(both, "finding_to_recommendation", [])[0] == "finding_to_recommendation"
+    assert pl.main_first(both, "subgroup_to_population", ["finding_to_recommendation"])[0] == "finding_to_recommendation"
+    assert pl.main_first(both, "", []) == both                          # scale order as last resort
+    # the main choice also appearing later in the AI's own list must not lose its first place
+    assert pl.main_first(both, "finding_to_recommendation", both)[0] == "finding_to_recommendation"
 
 
 def test_rewrite_failure_never_breaks_the_results(monkeypatch):
@@ -207,3 +217,60 @@ def test_interrupted_run_stops_loudly_and_resumes_from_cache(eval_dirs):
     evaluate.main(["--pairs", path, "--checker", "model-a", "--workers", "1", "--out", str(tmp / "out")])
     checked_again = [c for c in fake_llm.FakeLLM.calls if c[0] == "Report"]
     assert 0 < len(checked_again) < 5 + 5                         # only the failed pair is checked again
+
+
+@pytest.mark.parametrize("claim,missing", [
+    ("Participants ate 0.34 more cups of fruit.", []),          # paper writes 0⋅34 (raised dot)
+    ("Participants ate 0.22 more cups of vegetables.", []),     # paper writes 0·22 (middle dot)
+    ("The review covered 36,768 participants.", []),            # paper writes 36 768 (space separator)
+    ("The relative risk was 1.20.", []),
+    ("The programme reached over 830,000 residents.", []),     # honest rounding: 830,049 is over 830,000
+    ("The programme reached 830,000 residents.", ["830,000"]),  # bare rounding: a real problem
+    ("In 2019, 340 people took part.", []),                     # a year is not merged with the next number
+])
+def test_number_check_understands_journal_number_styles(claim, missing):
+    evidence = ("Participants consumed 0⋅34 cups more fruit and 0·22 cups more vegetables; 36 768 participants; "
+                "RR=1⋅20; an estimated 830 049 individuals; in 2019 340 people")
+    assert pl.number_check(claim, evidence) == missing
+
+
+PAPER = ("Fruit intake rose by 0·34 cups and vegetable intake by 0,22 cups. In total 830 049 people were reached by "
+         "701 changes. Accuracy was 14.7% (95% CI 12.1–17.3). Eight of the 25 sites were rural. The effect was −0.5. "
+         "Half of the participants were women. Overall 1.2 million meals were served in 2019.")
+
+
+@pytest.mark.parametrize("claim,problems", [
+    ("Fruit intake rose by 0.34 cups and vegetables by 0.22 cups.", []),            # dot styles and decimal comma
+    ("830,049 people were reached through 701 changes.", []),                        # space thousands separator
+    ("Accuracy was nearly 15%.", []),                                                 # honest: 14.7 is under 15
+    ("Accuracy was about 15%.", []),                                                  # honest approximation
+    ("Accuracy was over 15%.", ["15%"]),                   # wrong direction: 14.7 is not over 15
+    ("Accuracy was 15%.", ["15%"]),                                                   # bare rounding
+    ("8 of the twenty-five sites were rural.", []),                                   # words <-> digits
+    ("The effect was a decrease of 0.5.", []),                                        # sign ignored
+    ("50% of the participants were women.", []),                                      # 'half' <-> 50%
+    ("More than a million meals were served.", []),                                   # 1.2 million is more than a million
+    ("1.2 million meals were served in 2019.", []),                                   # scale words
+    ("Accuracy reached 19.7%.", ["19.7%"]),                                           # simply wrong
+    ("One of the sites was in the 21st century. #AI2026 https://x.org/7", []),         # generic words, ordinals, tags, links
+])
+def test_number_rule_compares_values(claim, problems):
+    assert pl.number_check(claim, "", PAPER) == problems
+
+
+def test_number_message_names_the_paper_value():
+    assert pl.number_issues("Accuracy was 15%.", "", PAPER) == ["15% (the paper says 14.7%)"]
+    assert pl.number_issues("Reached 830,000 people.", "", PAPER) == ["830,000 (the paper says 830,049)"]
+
+
+def test_number_found_elsewhere_in_paper_is_not_flagged():
+    cited = "Fruit intake rose by 0·34 cups."
+    assert pl.number_check("0.34 cups more fruit, reaching 830,049 people.", cited, PAPER) == []
+    assert pl.number_check("0.34 cups more fruit, reaching 830,049 people.", cited) == ["830,049"]
+
+
+def test_number_elsewhere_in_paper_must_be_about_the_same_thing():
+    passages = ["Fruit intake rose by 0·34 cups a day among participants.",
+                "Table 4: response rates 1·5 and 0·3 in the county survey."]
+    assert pl.number_check("Fruit intake rose by 0.34 cups a day.", "", passages) == []
+    assert pl.number_check("Fruit intake rose by 0.3 cups a day.", "", passages) == ["0.3"]      # 0·3 is about something else

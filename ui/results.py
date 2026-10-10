@@ -24,7 +24,6 @@ from ui.project import (
     mark_accepted,
     persist,
     proof,
-    recheck,
     replace_sentence,
     safe_recheck,
     visual_now,
@@ -235,15 +234,7 @@ def refine_view():
         shown = tr(quick) if quick else fb
         ss.chat.append({"role": "user", "content": shown + ("" if quick or target == "Everything"
                                                             else "  \n*" + tr("Applies to: {0}").format(tr(target)) + "*")})
-        with st.spinner(tr("Reworking the content and checking every claim again…")):
-            try:
-                apply_feedback(fb, "Everything" if quick else target)
-            except Exception as e:
-                log_error("rework content", e)
-                friendly = ai_problem(e, "send the feedback again")
-                ss.chat.append({"role": "assistant", "content": friendly or tr("Sorry, that did not work: {0}").format(e)})
-        persist()
-        st.rerun()
+        request("feedback", fb=fb, target="Everything" if quick else target)
 
 
 ACTION_HELP = ("Use faithful version = replace the sentence with the accurate wording from the paper. "
@@ -264,11 +255,7 @@ def attention_view():
         fixable = [r for r in todo if r.get("rewrite")]
         if h2.button(tr('Fix all ({0})').format(len(fixable)), type="primary", width="stretch", disabled=not fixable, key="fix_all",
                      help=tr("Replace every sentence that has a faithful version, then check again.")):
-            with st.spinner(tr("Applying the faithful versions and checking again…")):
-                for r in fixable:
-                    edit_claim(r, r["rewrite"].strip())
-                safe_recheck()
-            st.rerun()
+            request("fix_all")
         if h3.button(tr("Keep all remaining"), width="stretch", key="keep_all",
                      help=tr("Accept every flagged sentence that has no faithful version, as written.")):
             acc = ss.setdefault("accepted", [])
@@ -278,34 +265,25 @@ def attention_view():
             st.rerun()
         for r in todo:
             st.markdown("<hr style='margin:10px 0;border:none;border-top:1px solid #ece8dd'>", unsafe_allow_html=True)
-            c1, c2 = st.columns([3, 1.3], vertical_alignment="top")
+            c1, cp, c2 = st.columns([3, 1.7, 1.3], vertical_alignment="top")
             with c1:
-                st.markdown(tr("{0} <span style='color:var(--muted);font-size:13px'>&nbsp;{1}</span>").format(badge(r['verdict']), tr(r['part'])),
-                            unsafe_allow_html=True)
-                st.markdown(f"<div style='font-size:15px;margin:4px 0'><s style='color:#8f2f1b'>{html.escape(r['text'])}</s></div>"
-                            if r.get("rewrite") else f"<div style='font-size:15px;margin:4px 0'>{html.escape(r['text'])}</div>",
-                            unsafe_allow_html=True)
-                if r.get("rewrite"):
-                    st.markdown(f"<div style='font-size:15px;color:#2f6450'>→ {html.escape(r['rewrite'])}</div>", unsafe_allow_html=True)
-                why = r.get("explanation") or "; ".join(r.get("rule_flags", []))
-                if why:
-                    st.caption(why)
+                statement_view(r)
+            with cp:
+                type_panel(r)
             with c2:
+                if not r.get("rewrite") and can_rewrite(r) and st.button(
+                        tr("Write faithful version"), key=f"write_{r['id']}", type="primary", width="stretch",
+                        help=tr("Rewrite this sentence at the strength the paper supports, then check it again.")):
+                    request("write", rid=r["id"])
                 if r.get("rewrite") and st.button(tr("Use faithful version"), key=f"fix_{r['id']}", type="primary", width="stretch"):
-                    with st.spinner(tr("Updating and checking again…")):
-                        edit_claim(r, r["rewrite"].strip())
-                        safe_recheck()
-                    st.rerun()
+                    request("fix", rid=r["id"])
                 if st.button(tr("Keep as is"), key=f"keep_{r['id']}", width="stretch"):
                     ss.setdefault("accepted", []).append(r["text"])
                     mark_accepted()
                     persist()
                     st.rerun()
                 if r["part"] != "Headline" and st.button(tr("Remove"), key=f"rm_{r['id']}", width="stretch"):
-                    with st.spinner(tr("Removing and checking again…")):
-                        edit_claim(r, "")
-                        safe_recheck()
-                    st.rerun()
+                    request("remove", rid=r["id"])
 
 
 @st.fragment
@@ -358,21 +336,123 @@ def anim_body(key, card, c):
                            width="stretch", key=f"dla_{key}")
 
 
-@st.fragment
-def types_view(r):
-    """Distortion type chips with the evidence level next to the claim level, e.g. Paper: an association · Claim: cause and effect."""
-    types = r.get("types") or []
-    if not types:
+# Labels for flags that are not one of the four measured patterns (descriptive, derived from the checker's reason).
+OTHER_LABELS = (
+    ("contradict", "Reported result → contradicted"),
+    ("opposite", "Reported result → contradicted"),
+    ("number", "Exact figure → altered figure"),
+    ("figure", "Exact figure → altered figure"),
+    ("round", "Exact figure → altered figure"),
+    ("percent", "Exact figure → altered figure"),
+    ("limitation", "Qualified result → caveat removed"),
+    ("caveat", "Qualified result → caveat removed"),
+    ("attribut", "One group's result → misattributed"),
+    ("credited", "One group's result → misattributed"),
+    ("wrong method", "One group's result → misattributed"),
+    ("wrong group", "One group's result → misattributed"),
+    ("hype", "Measured result → hyped"),
+    ("breakthrough", "Measured result → hyped"),
+    ("revolution", "Measured result → hyped"),
+    ("inflat", "Measured result → hyped"),
+)
+
+
+def distortion_label(r):
+    """(label, measured) for a flagged result: one of the four tested patterns, or a descriptive label for other flags."""
+    if r.get("types"):
+        return pl.DISTORTION_LABELS.get(r["types"][0], r["types"][0]), True
+    verdict = r.get("verdict", "")
+    if verdict == "UNCHECKED":
+        return "Not checked → check again", False
+    flags = " ".join(r.get("rule_flags", [])).lower()
+    if verdict == "NEEDS_REVIEW" and "number" in flags:
+        return "Exact figure → altered figure", False
+    if verdict == "NEEDS_REVIEW" and "no valid source" in flags:
+        return "No source passage found → needs review", False
+    reason = f"{r.get('issue_type', '')} {r.get('explanation', '')}".lower()
+    for word, label in OTHER_LABELS:
+        if word in reason:
+            return label, False
+    if verdict == "UNSUPPORTED":
+        return "Not in the paper → stated as fact", False
+    return "Supported strength → overstated", False
+
+
+def type_panel(r):
+    """The 'Distortion type' panel: the label, and for the four measured patterns the paper's level (green) next to
+    the claim's level (red)."""
+    if r.get("verdict") not in pl.FLAGGED:
         return
-    chips = " ".join(f"<span class='cf-type'>{html.escape(tr(pl.DISTORTION_LABELS.get(t, t)))}</span>" for t in types)
-    rows = []
-    for sc, (ev, cl) in (r.get("levels") or {}).items():
-        if pl.DISTORTION_OF[sc] in types and ev and cl:
-            rows.append(tr("Paper: {0} · Claim: {1}").format(tr(pl.LEVEL_WORDS[ev]), tr(pl.LEVEL_WORDS[cl])))
-    st.markdown(chips + "".join(f"<div style='font-size:13px;color:#5f6b66;margin-top:4px'>{html.escape(x)}</div>" for x in rows),
+    label, measured = distortion_label(r)
+    levels = ""
+    if measured:
+        for sc, (ev, cl) in (r.get("levels") or {}).items():
+            if pl.DISTORTION_OF[sc] in r["types"][:1] and ev and cl:
+                levels += (f"<div class='cf-levels'><span class='cf-ev'>{html.escape(tr('Paper'))}: {html.escape(tr(pl.LEVEL_WORDS[ev]))}</span>"
+                           f"<span class='cf-arrow'>↓</span>"
+                           f"<span class='cf-cl'>{html.escape(tr('Claim'))}: {html.escape(tr(pl.LEVEL_WORDS[cl]))}</span></div>")
+    also = [pl.DISTORTION_LABELS.get(t, t) for t in (r.get("types") or [])[1:]]
+    extra = (f"<div class='cf-also'>{html.escape(tr('Also'))}: {html.escape(', '.join(tr(a) for a in also))}</div>" if also else "")
+    st.markdown(f"<div class='cf-panel'><div class='cf-panel-h'>{html.escape(tr('Distortion type'))}</div>"
+                f"<div class='cf-panel-l'>{html.escape(tr(label))}</div>{levels}{extra}</div>", unsafe_allow_html=True)
+
+
+def statement_view(r):
+    """Original sentence (crossed out in red when a faithful version exists), the faithful version in green, why."""
+    st.markdown(tr("{0} <span style='color:var(--muted);font-size:13px'>&nbsp;{1}</span>").format(badge(r['verdict']), tr(r['part'])),
                 unsafe_allow_html=True)
+    if r.get("rewrite"):
+        st.markdown(f"<div class='cf-orig'><s>{html.escape(r['text'])}</s></div>"
+                    f"<div class='cf-fix'><span class='cf-fix-h'>{html.escape(tr('Faithful version'))}</span>{html.escape(r['rewrite'])}</div>",
+                    unsafe_allow_html=True)
+        rewrite_status(r)
+    else:
+        st.markdown(f"<div style='font-size:15px;margin:4px 0'>{html.escape(r['text'])}</div>", unsafe_allow_html=True)
+    why = r.get("explanation") or "; ".join(r.get("rule_flags", []))
+    if why:
+        st.caption(why)
 
 
+def rewrite_status(r):
+    """Whether the faithful version passed the independent re-check."""
+    if r.get("rewrite_verified") is True:
+        st.caption("✓ " + tr("Re-checked by the independent checker: supported by the paper."))
+    elif r.get("rewrite_verified") is False:
+        st.caption("⚠ " + tr("The re-check did not confirm this version. Edit it before use."))
+
+
+def can_rewrite(r):
+    """The rewrite step fixes overclaims (a sentence stronger than its evidence), not invented facts or wrong numbers."""
+    return bool(r.get("evidence")) and (bool(r.get("types")) or r.get("verdict") == "EXAGGERATED")
+
+
+def write_faithful(r):
+    """On demand: the writer rewrites one flagged sentence to the paper's strength; the checker re-checks it."""
+    if not allow("run"):
+        return
+    try:
+        pl.rewrite_flagged(llm(), checker(), ss.passages, [r])
+    except Exception as e:
+        log_error("faithful rewrite", e)
+        st.warning(ai_problem(e) or tr("Sorry, that did not work: {0}").format(e))
+        return
+    if not r.get("rewrite"):
+        st.warning(tr("No faithful version could be written for this sentence. Edit or remove it."))
+    persist()
+
+
+def distortion_list(results):
+    """The distorted sentences of a text with their type, both levels and the verified faithful version."""
+    for r in [r for r in results if r["verdict"] in pl.FLAGGED]:
+        with st.container(border=True):
+            c1, cp = st.columns([3, 1.7], vertical_alignment="top")
+            with c1:
+                statement_view(r)
+            with cp:
+                type_panel(r)
+
+
+@st.fragment
 def fact_check_view(flagged):
     """Runs on its own: switching filters or opening page views does not reload the whole page."""
     res = ss.results
@@ -389,21 +469,16 @@ def fact_check_view(flagged):
         if r["verdict"] == "NOT_A_CLAIM" or (only and r["verdict"] == "SUPPORTED"):
             continue
         with st.container(border=True):
-            st.markdown(tr("{0} <span style='color:#5f6b66;font-size:13px'>&nbsp;{1} · {2}</span>").format(badge(r['verdict']), tr(r['part']), r['id']),
-                        unsafe_allow_html=True)
-            st.markdown(f"**{html.escape(r['text'])}**")
-            types_view(r)
-            if r.get("explanation"):
-                st.caption((r["issue_type"].capitalize() + " — " if r.get("issue_type") else "") + r["explanation"])
-            for f in r.get("rule_flags", []):
-                st.caption(tr('Rule check: {0}').format(f))
-            if r.get("rewrite"):
-                st.markdown(tr("<div class='vp-quote'><b>Faithful version:</b> {0}</div>").format(html.escape(r['rewrite'])),
-                            unsafe_allow_html=True)
-                if r.get("rewrite_verified") is True:
-                    st.caption("✓ " + tr("Re-checked by the independent checker: supported by the paper."))
-                elif r.get("rewrite_verified") is False:
-                    st.caption("⚠ " + tr("The re-check did not confirm this version. Edit it before use."))
+            c1, cp = st.columns([3, 1.7], vertical_alignment="top")
+            with c1:
+                if r["verdict"] in pl.FLAGGED:
+                    statement_view(r)
+                else:
+                    st.markdown(tr("{0} <span style='color:#5f6b66;font-size:13px'>&nbsp;{1} · {2}</span>").format(badge(r['verdict']), tr(r['part']), r['id']),
+                                unsafe_allow_html=True)
+                    st.markdown(f"**{html.escape(r['text'])}**")
+            with cp:
+                type_panel(r)
             for p in r["evidence"]:
                 st.markdown(tr("<div class='vp-quote'><b>Paper, p. {0}</b> · {1}</div>").format(p.page, html.escape(p.text[:600])),
                             unsafe_allow_html=True)
@@ -421,9 +496,10 @@ def build_package(content, res):
             z.writestr(f"image_{name}.png", card_bytes(name)[0])
         rows = io.StringIO()
         w = csv.writer(rows)
-        w.writerow(["id", "part", "text", "verdict", "issue", "explanation", "faithful_version", "source", "rule_flags"])
+        w.writerow(["id", "part", "text", "verdict", "distortion_type", "explanation", "faithful_version", "source", "rule_flags"])
         for r in res:
-            w.writerow([r["id"], r["part"], r["text"], r["verdict"], r.get("issue_type", ""), r.get("explanation", ""),
+            w.writerow([r["id"], r["part"], r["text"], r["verdict"],
+                        distortion_label(r)[0] if r["verdict"] in pl.FLAGGED else "", r.get("explanation", ""),
                         r.get("rewrite", ""), " | ".join(f"p.{p.page} {p.pid}" for p in r["evidence"]),
                         "; ".join(r.get("rule_flags", []))])
         z.writestr("verification_report.csv", "\ufeff" + rows.getvalue())
@@ -433,7 +509,103 @@ def build_package(content, res):
     return buf.getvalue()
 
 
+PENDING_LABELS = {
+    "fix_all": "Applying the faithful versions…",
+    "fix": "Applying the faithful version…",
+    "remove": "Removing and checking again…",
+    "write": "Writing a faithful version and checking it…",
+    "edits": "Checking…",
+    "feedback": "Reworking the content and checking every claim again…",
+    "stress": "Writing a hyped version and checking it…",
+}
+
+
+def request(kind, **data):
+    """Remember a slow action and reload. It then runs at the top of the page, before anything is drawn, so the
+    page never shows the old and the new results at the same time while the work is in progress."""
+    ss["pending_action"] = {"kind": kind, **data}
+    st.rerun()
+
+
+def apply_verified(r):
+    """Uses a faithful version that already passed the independent re-check, without checking everything again
+    (instant, no AI calls). Only for single sentences, so the sentence-by-sentence highlighting stays aligned."""
+    new = (r.get("rewrite") or "").strip()
+    if not new or r.get("rewrite_verified") is not True:
+        return False
+    if (r["part"] == "Press release" or r["part"] in POST_OF) and len(pl.split_sentences(new)) != 1:
+        return False
+    if not edit_claim(r, new):
+        return False
+    check = r.get("rewrite_check") or {}
+    r.update(text=new, verdict="SUPPORTED", types=[], distortions=[], issue_type="", explanation="", rule_flags=[],
+             rewrite="", rewrite_verified=None, levels=check.get("levels") or r.get("levels", {}), fixed=True)
+    return True
+
+
+def after_local_edit():
+    """What a re-check would refresh, without the AI: images, video and the saved project."""
+    make_cards()
+    ss.pop("video", None)
+    ss.pop("anims", None)
+    persist()
+
+
+def run_pending(slot):
+    """Runs a remembered slow action inside a fixed slot at the top of the results, before they are drawn."""
+    a = ss.pop("pending_action", None)
+    if not a:
+        return
+    kind = a["kind"]
+    r = next((x for x in ss.results if x["id"] == a.get("rid")), None) if a.get("rid") else None
+    with slot.container(), st.spinner(tr(PENDING_LABELS[kind])):
+        if kind == "fix_all":
+            needs_check = False
+            for x in [x for x in ss.results if x["verdict"] in pl.FLAGGED and x.get("rewrite")]:
+                if not apply_verified(x):
+                    edit_claim(x, x["rewrite"].strip())
+                    needs_check = True
+            safe_recheck() if needs_check else after_local_edit()
+        elif kind == "fix" and r is not None:
+            if apply_verified(r):
+                after_local_edit()
+            else:
+                edit_claim(r, r["rewrite"].strip())
+                safe_recheck()
+        elif kind == "remove" and r is not None:
+            edit_claim(r, "")
+            safe_recheck()
+        elif kind == "write" and r is not None:
+            write_faithful(r)
+        elif kind == "edits":
+            ss.release = a["text"]
+            safe_recheck()
+        elif kind == "feedback":
+            try:
+                apply_feedback(a["fb"], a["target"])
+            except Exception as e:
+                log_error("rework content", e)
+                friendly = ai_problem(e, "send the feedback again")
+                ss.chat.append({"role": "assistant", "content": friendly or tr("Sorry, that did not work: {0}").format(e)})
+            persist()
+        elif kind == "stress":
+            try:
+                engine = llm()
+                hyped = pl.hype_version(engine, ss.release)
+                chk = checker()
+                hres = pl.verify(chk, ss.passages, pl.build_items("", hyped, [], {}))
+                try:
+                    pl.rewrite_flagged(engine, chk, ss.passages, hres)
+                except Exception as e:
+                    log_error("faithful rewrite", e)
+                ss.hype = (hyped, hres)
+            except Exception as e:
+                log_error("stress test", e)
+                st.warning(ai_problem(e) or tr("Sorry, that did not work: {0}").format(e))
+
+
 def results_view():
+    run_pending(st.empty())                    # the slot exists on every run, so the layout never shifts
     if not all(k in ss.get("cards", {}) for k in ("square", "wide", "portrait")):
         make_cards()
     res, content = ss.results, ss.content
@@ -484,10 +656,7 @@ def results_view():
         with st.expander(tr("Edit and re-check")):
             edited = st.text_area(tr("Press release"), ss.release, height=340, label_visibility="collapsed")
             if st.button(tr("Re-check my edits")):
-                with st.spinner(tr("Checking…")):
-                    ss.release = edited
-                    recheck()
-                st.rerun()
+                request("edits", text=edited)
 
     with t_soc:
         cols = st.columns(2, gap="medium")
@@ -580,10 +749,7 @@ def results_view():
             st.markdown(tr("**Does the checker really catch hype?**"))
             st.caption(tr("CiteFlow writes an over-enthusiastic version of the release on purpose, then checks it with the same verifier."))
             if st.button(tr("Run stress test")) and allow("run"):
-                with st.spinner(tr("Writing a hyped version and checking it…")):
-                    engine = llm()
-                    hyped = pl.hype_version(engine, ss.release)
-                    ss.hype = (hyped, pl.verify(checker(), ss.passages, pl.build_items("", hyped, [], {})))
+                request("stress")
             if "hype" in ss:
                 hyped, hres = ss.hype
                 hok, htot = pl.score(hres)
@@ -591,6 +757,9 @@ def results_view():
                             unsafe_allow_html=True)
                 st.markdown(f"<div class='vp-release'>{paragraphs_html(hres, 'Press release', hyped)}</div>",
                             unsafe_allow_html=True)
+                if any(r["verdict"] in pl.FLAGGED for r in hres):
+                    st.markdown(tr("**What the checker found in the hyped version, and the faithful fix**"))
+                    distortion_list(hres)
 
     with t_exp:
         with st.container(border=True):

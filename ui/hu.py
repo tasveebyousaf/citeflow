@@ -515,8 +515,8 @@ HU = {
         "Alcsoport → teljes népesség",
     "Preliminary → established":
         "Előzetes → bizonyított",
-    "Finding → recommendation":
-        "Eredmény → ajánlás",
+    "Measured outcome → recommendation":
+        "Mért eredmény → ajánlás",
     "Paper: {0} · Claim: {1}":
         "Tanulmány: {0} · Állítás: {1}",
     "no causal link":
@@ -533,12 +533,54 @@ HU = {
         "előzetes eredmény",
     "an established fact":
         "bizonyított tény",
-    "a finding":
-        "eredmény",
+    "a measured outcome":
+        "mért eredmény",
     "a recommendation":
         "ajánlás",
     "Re-checked by the independent checker: supported by the paper.":
         "A független ellenőrző újra ellenőrizte: a tanulmány alátámasztja.",
     "The re-check did not confirm this version. Edit it before use.":
         "Az újraellenőrzés nem erősítette meg ezt a változatot. Használat előtt szerkessze.",
+    "Write faithful version":
+        "Hű változat írása",
+    "Rewrite this sentence at the strength the paper supports, then check it again.":
+        "A mondat átírása a tanulmány által alátámasztott erősségre, majd újraellenőrzés.",
+    "Writing a faithful version and checking it…":
+        "Hű változat írása és ellenőrzése…",
+    "No faithful version could be written for this sentence. Edit or remove it.":
+        "Ehhez a mondathoz nem sikerült hű változatot írni. Szerkessze vagy törölje.",
+    "**What the checker found in the hyped version, and the faithful fix**":
+        "**Amit az ellenőrző a túlzó változatban talált, és a hű javítás**",
+    "Distortion type":
+        "Torzítás típusa",
+    "Paper":
+        "Tanulmány",
+    "Claim":
+        "Állítás",
+    "Also":
+        "Továbbá",
+    "Faithful version":
+        "Hű változat",
+    "Reported result → contradicted":
+        "Közölt eredmény → ellentmondás",
+    "Exact figure → altered figure":
+        "Pontos adat → módosított adat",
+    "Qualified result → caveat removed":
+        "Korlátozott eredmény → korlát elhagyva",
+    "One group's result → misattributed":
+        "Egy csoport eredménye → téves hozzárendelés",
+    "Measured result → hyped":
+        "Mért eredmény → felnagyítva",
+    "Not checked → check again":
+        "Nincs ellenőrizve → ellenőrizze újra",
+    "No source passage found → needs review":
+        "Nincs forrásrészlet → ellenőrzés szükséges",
+    "Not in the paper → stated as fact":
+        "Nincs a tanulmányban → tényként állítva",
+    "Supported strength → overstated":
+        "Alátámasztott erősség → túlzás",
+    "Applying the faithful versions…":
+        "A hű változatok alkalmazása…",
+    "Applying the faithful version…":
+        "A hű változat alkalmazása…",
 }

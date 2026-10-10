@@ -36,7 +36,7 @@ def test_check_pdf_rejects_password_protected():
 
 def test_number_rule():
     assert pl.number_check("Accuracy was 88.8% on 339 smears", "an average accuracy of 88.8% on 339 smears") == []
-    assert pl.number_check("Accuracy was 89%", "an average accuracy of 88.8%") == ["89"]
+    assert pl.number_check("Accuracy was 89%", "an average accuracy of 88.8%") == ["89%"]
     assert pl.number_check("1,000 cells", "1000 cells") == []
     assert pl.number_check("#AI2026 is here", "") == []          # hashtags ignored
 

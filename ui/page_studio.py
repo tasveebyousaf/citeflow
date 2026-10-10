@@ -47,10 +47,13 @@ def page_studio():
         elif not allow("run"):
             go = False
 
+    # A fixed slot for progress and errors, present on every run: the page keeps the same layout, so new results
+    # replace the old ones in place and the page never shows two copies while work is running.
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    slot = st.empty()
     if go:
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
         try:
-            with st.status(tr("Reading the paper…"), expanded=False) as status:
+            with slot.container(), st.status(tr("Reading the paper…"), expanded=False) as status:
                 data = pdf.getvalue()
                 ss.pdf_bytes = data
                 ss.proofs = {}
@@ -82,11 +85,11 @@ def page_studio():
         except Exception as e:
             log_error("create content", e)
             friendly = ai_problem(e, "click **Create verified content** again")
-            if friendly:
-                st.warning(friendly)
-            else:
-                st.error(tr('Something went wrong: {0}').format(e))
+            with slot.container():
+                if friendly:
+                    st.warning(friendly)
+                else:
+                    st.error(tr('Something went wrong: {0}').format(e))
 
     if "results" in ss:
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
         results_view()

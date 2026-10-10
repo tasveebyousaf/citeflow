@@ -153,8 +153,8 @@ def log_error(action, error):
 
 
 def llm():
-    """The writer."""
-    chain = model_chain(GEMINI_KEY)
+    """The writer. Never uses the model set as the fixed checker (CHECKER_MODEL), so a different model checks its work."""
+    chain = pl.writer_chain(model_chain(GEMINI_KEY), secret("CHECKER_MODEL") or "auto")
     return pl.LLM(GEMINI_KEY, chain[0], fallbacks=chain[1:], on_call=monitor_hook())
 
 
@@ -264,7 +264,17 @@ html, body, [class*="css"], .stApp, button, input, textarea, select { font-famil
 button:focus-visible, a:focus-visible, [role="tab"]:focus-visible { outline:3px solid var(--gold) !important; outline-offset:2px; }
 .vp-legend { display:flex; gap:16px; font-size:13px; color:var(--muted); margin-top:4px; flex-wrap:wrap; }
 .vp-dot { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; vertical-align:middle; }
-.cf-type { display:inline-block; background:#f6ead0; color:#7a5a12; border-radius:999px; padding:2px 10px; font-size:12.5px; font-weight:700; margin:2px 4px 2px 0; }
+.cf-panel { background:#fbf8f1; border:1px solid var(--line); border-left:4px solid var(--warn); border-radius:12px; padding:10px 12px; }
+.cf-panel-h { font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+.cf-panel-l { font-size:15.5px; font-weight:800; color:var(--ink); margin:3px 0 8px; }
+.cf-levels { display:flex; flex-direction:column; align-items:flex-start; gap:2px; margin-top:4px; }
+.cf-ev { background:#e3f0e9; color:#245a45; border-radius:999px; padding:3px 10px; font-size:12.5px; font-weight:700; }
+.cf-cl { background:#f8e1da; color:#8f2f1b; border-radius:999px; padding:3px 10px; font-size:12.5px; font-weight:700; }
+.cf-arrow { color:var(--muted); font-weight:800; padding-left:12px; line-height:1.1; }
+.cf-also { font-size:12px; color:var(--muted); margin-top:8px; }
+.cf-orig { font-size:15px; margin:6px 0 4px; color:#8f2f1b; }
+.cf-fix { font-size:15px; color:#245a45; background:#eef6f1; border-radius:10px; padding:8px 10px; margin:4px 0; }
+.cf-fix-h { display:block; font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:#3d7a62; margin-bottom:2px; }
 .vp-badge { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.06em; border-radius:5px; padding:3px 8px; text-transform:uppercase; }
 .b-SUPPORTED { color:#2f6450; background:#e7f1ec; } .b-EXAGGERATED { color:#8a5a00; background:#fbf0d8; }
 .b-UNSUPPORTED { color:#8f2f1b; background:#f8e3dc; } .b-NEEDS_REVIEW, .b-UNCHECKED { color:#7a5d0f; background:#f6f0da; }

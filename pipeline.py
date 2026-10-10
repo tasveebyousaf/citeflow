@@ -164,7 +164,8 @@ def proof_image(pdf_bytes: bytes, passage: Passage, zoom: float = 2.0, crop: boo
         area = pymupdf.Rect(min(r[0] for r in rects), min(r[1] for r in rects),
                             max(r[2] for r in rects), max(r[3] for r in rects))
         for num in {n for n in NUM_RE.findall(re.sub(r"#\w+", "", claim))}:
-            for variant in {num, num.replace(",", "."), num.replace(".", ",")}:
+            for variant in {num, num.replace(",", "."), num.replace(".", ","), num.replace(".", "\u00b7"),
+                            num.replace(".", "\u22c5")}:
                 for hit in page.search_for(variant, clip=area):
                     d.rounded_rectangle([hit.x0 * zoom - 5, hit.y0 * zoom - 4, hit.x1 * zoom + 5, hit.y1 * zoom + 4],
                                         5, outline=(240, 68, 56, 255), width=4)
@@ -270,6 +271,7 @@ class Verdict(BaseModel):
     evidence_act: str = "finding"
     claim_act: str = "finding"
     distortion_types: list[str] = []
+    main_distortion: str = ""
 
 
 class Report(BaseModel):
@@ -373,16 +375,24 @@ point; rate the item by what an ordinary reader would understand from it, includ
   (linked, associated, correlated, predicts, more/less likely, observational), "causal" (causes, leads to, reduces,
   improves, prevents, increases, protects; or a randomised experiment showing an effect).
   Results of a randomised controlled trial or a controlled experiment may be rated "causal" in the evidence.
-- evidence_scope / claim_scope: "studied" (limited to the group, sample, species, setting or condition that was
-  studied, or explicitly named), "general" (applies beyond it: people, everyone, patients, children, humans in general).
+- evidence_scope / claim_scope: "studied" (about the kind of group, sample, species, setting or condition that was
+  studied), "general" (applies the result beyond it: to everyone, to people or humans in general, or to a different or
+  wider group than the one studied, e.g. mice -> people, young adults -> children, 14-year-olds -> adults, one sex -> both).
+  Naming the same kind of group that was studied (older adults studied -> "older adults") is "studied", not "general".
   Rate the evidence "general" only if the source itself makes the general statement.
 - evidence_certainty / claim_certainty: "tentative" (pilot, small or early study, simulation, "may", "suggests",
   "preliminary", "further research is needed"; or a claim that clearly frames the result as early or as one study's
   finding), "definitive" (presented as proven, confirmed, settled, a definitive result, or a plain general fact).
 - evidence_act / claim_act: "finding" (reports what was observed), "recommendation" (tells people what they should
-  or must do, gives advice or policy).
+  or must do, gives advice or policy). Rate the evidence "recommendation" only if the source makes the SAME
+  recommendation (same action, same audience); a different or more specific recommendation than the source's counts
+  as "finding" for the evidence.
 - distortion_types: the claim-type distortions you see, from exactly these codes (empty list if none):
   "correlation_to_causation", "subgroup_to_population", "preliminary_to_established", "finding_to_recommendation".
+- main_distortion: the ONE code from the list above that best describes how this claim overstates its evidence
+  (the change a careful editor would fix first); "" if none.
+Give the four ratings for EVERY claim, also for EXAGGERATED and UNSUPPORTED ones: advice the source does not give is
+still a recommendation, and a group the source did not study is still a wider scope.
 A claim may legitimately be weaker than the evidence; only a claim that is STRONGER than its evidence is a distortion.
 A recommendation is not a distortion if the source itself makes the same recommendation.
 
@@ -431,6 +441,8 @@ SOURCE DOCUMENT (numbered passages):
 
 HYPE_PROMPT = """Rewrite the press release below the way an over-enthusiastic PR writer might: add typical hype
 (e.g. "breakthrough", causal claims, real-world or clinical impact, removed limitations, rounded-up numbers).
+Include at least one of each: an association stated as cause and effect; a result for the studied group applied to
+people in general; a preliminary or small-study result presented as proven; a finding turned into advice ("should").
 Keep the same language and similar length. This is used to test an automatic fact-checker.
 
 {guard}
@@ -482,7 +494,8 @@ CONTENT:
 # ---------------------------------------------------------------- LLM client
 
 TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "INTERNAL", "overloaded", "high demand",
-             "timed out", "Timeout", "Connection")
+             "timed out", "Timeout", "Connection", "disconnected", "RemoteProtocolError", "ReadError", "ConnectError",
+             "reset by peer", "temporarily", "504", "DEADLINE_EXCEEDED")
 
 
 class QuotaExhausted(RuntimeError):
@@ -634,7 +647,7 @@ class LLM:
             except Exception as e:
                 self.last_error, msg = e, str(e)
                 self._emit(model, schema, False, f"{type(e).__name__}: {msg}", started)
-                kind = classify_error(msg)
+                kind = classify_error(f"{type(e).__name__}: {msg}")     # network errors are named by their type
                 if kind == "credits":
                     raise CreditsExhausted("The AI credits are used up. Please contact the administrator.") from e
                 if kind == "thinking" and self.fast:
@@ -697,6 +710,14 @@ def model_chain(api_key: str, found: list[str] | None = None) -> list[str]:
     full = [m for m in chain if "lite" not in m][:3]
     lite = [m for m in chain if "lite" in m][:2]
     return (full + lite + ["gemini-flash-latest", "gemini-flash-lite-latest"])[:7]
+
+
+def writer_chain(chain: list[str], checker_setting: str = "auto") -> list[str]:
+    """The writer's models without the fixed checker model, so writing and checking use different models."""
+    fixed = (checker_setting or "auto").strip()
+    if fixed in ("auto", "same"):
+        return list(chain)
+    return [m for m in chain if m != fixed] or list(chain)
 
 
 def checker_chain(chain: list[str], setting: str = "auto", strict: bool = False) -> list[str]:
@@ -828,18 +849,152 @@ def safe_visual(visual, results):
 NUM_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?!\d)|\d+(?:[.,]\d+)?")
 
 
-def _norm_num(s: str) -> str:
-    if re.fullmatch(r"\d{1,3}(,\d{3})+", s):  # 1,000 -> 1000 (thousands separator)
-        s = s.replace(",", "")
-    s = s.replace(",", ".")
-    return s.rstrip("0").rstrip(".") if "." in s else s
+# ---------------------------------------------------------------- number rule: compare values, not text
+
+_DOTS = ".·⋅∙‧․"            # . · ⋅ ∙ ‧ ․  used as decimal points
+_GAPS = "     '’"                # spaces and apostrophes used between thousands
+_UNITS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+          "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+          "eighteen": 18, "nineteen": 19}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_SCALE = {"hundred": 100, "thousand": 1_000, "k": 1_000, "million": 1_000_000, "m": 1_000_000,
+          "billion": 1_000_000_000, "bn": 1_000_000_000}
+_FRACTIONS = {"half": 50, "a third": 100 / 3, "one third": 100 / 3, "a quarter": 25, "one quarter": 25,
+              "two-thirds": 200 / 3, "two thirds": 200 / 3, "three-quarters": 75, "three quarters": 75}
+_HEDGE_UP = r"(?:over|more than|above|at least|exceeding|upwards of)"           # the paper's value is >= the claim's
+_HEDGE_DOWN = r"(?:nearly|almost|under|less than|below|up to|just under)"       # the paper's value is <= the claim's
+_HEDGE_ANY = r"(?:about|around|approximately|roughly|some|circa|ca\.|~|≈|an estimated|estimated)"
+_NUM = re.compile(r"(?<![\w.])(-?\d+(?:[.,]\d+)*)(\s*(?:%|percent|per cent))?(\s*(?:million|billion|thousand|bn|k|m)\b)?",
+                  re.I)
 
 
-def number_check(claim: str, evidence_text: str) -> list[str]:
-    """Deterministic rule: every number in a claim must appear in the cited evidence."""
-    claim = re.sub(r"#\w+", "", claim)
-    ev = {_norm_num(n) for n in NUM_RE.findall(evidence_text)}
-    return [n for n in NUM_RE.findall(claim) if _norm_num(n) not in ev]
+def _plain(text: str) -> str:
+    """Journal number styles to plain ones: 0·34 -> 0.34, 36 768 -> 36768, '−' -> '-'; drops hashtags, links, handles."""
+    import unicodedata
+    t = unicodedata.normalize("NFKC", text or "")
+    t = re.sub(r"https?://\S+|www\.\S+|\S+@\S+\.\w+|[#@]\w+", " ", t)
+    t = re.sub(rf"(?<=\d)[{_DOTS[1:]}](?=\d)", ".", t)
+    t = re.sub(rf"(?<!\d)\d{{1,3}}(?:[{_GAPS}]\d{{3}})+(?![\d.,]\d)", lambda m: re.sub(rf"[{_GAPS}]", "", m.group()), t)
+    t = re.sub(r"(?<![\w-])[−‒–—-](?=\d)", "-", t)            # a sign, not a range
+    return t
+
+
+def _value(raw: str) -> float | None:
+    raw = raw.lstrip("-")
+    if re.fullmatch(r"\d{1,3}(,\d{3})+(\.\d+)?", raw):                         # 1,000 / 830,049.5
+        raw = raw.replace(",", "")
+    elif re.fullmatch(r"\d+,\d+", raw):                                       # 0,34 (decimal comma)
+        raw = raw.replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _words_to_numbers(text: str) -> list[tuple[str, float, bool]]:
+    """Number words: 'eight', 'twenty-five', 'three hundred', 'half' (as a percentage)."""
+    out, low = [], text.lower()
+    for phrase, pct in _FRACTIONS.items():
+        for m in re.finditer(rf"\b{phrase}\b", low):
+            out.append((m.group(), pct, True))
+    pattern = r"\b(?:(" + "|".join(_TENS) + r")(?:[- ](" + "|".join(_UNITS) + r"))?|(" + "|".join(_UNITS) + r"))" \
+              r"(?:\s+(hundred|thousand|million|billion))?\b"
+    for m in re.finditer(pattern, low):
+        v = (_TENS.get(m.group(1), 0) + _UNITS.get(m.group(2) or "", 0)) if m.group(1) else _UNITS[m.group(3)]
+        if m.group(4):
+            v *= _SCALE[m.group(4)]
+        out.append((m.group(), float(v), False))
+    return out
+
+
+def numbers_in(text: str) -> list[dict]:
+    """Every number in a text as a value: digits in any common format, number words, %, million/thousand."""
+    t = _plain(text)
+    found = []
+    for m in _NUM.finditer(t):
+        raw, pct, scale = m.group(1), m.group(2), m.group(3)
+        if re.match(r"(st|nd|rd|th)\b", t[m.end(1):m.end(1) + 3]):              # ordinals: 21st, 3rd
+            continue
+        v = _value(raw)
+        if v is None:
+            continue
+        if scale:
+            v *= _SCALE[scale.strip().lower()]
+        before = t[max(0, m.start() - 22):m.start()].lower()
+        found.append({"raw": m.group().strip(), "value": abs(v), "percent": bool(pct), "before": before})
+    for raw, v, pct in _words_to_numbers(t):
+        found.append({"raw": raw, "value": v, "percent": pct, "before": ""})
+    return found
+
+
+def _same(a: float, b: float) -> bool:
+    return abs(a - b) <= max(1e-9, 1e-6 * max(abs(a), abs(b)))
+
+
+def _matches(n: dict, paper: list[float]) -> bool:
+    candidates = [n["value"]] + ([n["value"] / 100] if n["percent"] else [n["value"] * 100])
+    return any(_same(c, p) for c in candidates for p in paper)
+
+
+def _honest_rounding(n: dict, paper: list[float]) -> bool:
+    """'over 830,000' for 830,049 or 'nearly 15%' for 14.7% is true; a bare '15%' for 14.7% is not."""
+    v, before = n["value"], n["before"]
+    close = [p for p in paper if p and abs(p - v) / max(abs(p), abs(v)) <= 0.05]
+    if not close:
+        return False
+    if re.search(rf"{_HEDGE_UP}\s*$", before):
+        return any(p >= v for p in close)
+    if re.search(rf"{_HEDGE_DOWN}\s*$", before):
+        return any(p <= v for p in close)
+    return bool(re.search(rf"{_HEDGE_ANY}\s*$", before))
+
+
+def _closest(v: float, paper: list[float]) -> float | None:
+    near = [p for p in paper if p and abs(p - v) / max(abs(p), abs(v)) <= 0.25]
+    return min(near, key=lambda p: abs(p - v)) if near else None
+
+
+def _show(v: float) -> str:
+    return f"{v:,.0f}" if v == int(v) and v >= 1000 else (f"{v:g}")
+
+
+_STOP = {"with", "that", "this", "from", "were", "have", "been", "their", "which", "than", "more", "less", "into",
+         "after", "before", "about", "over", "under", "also", "they", "there", "these", "those", "study", "paper",
+         "results", "average", "total", "per", "percent", "cent"}
+
+
+def _content_words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z]{4,}", text.lower()) if w not in _STOP}
+
+
+def number_issues(claim: str, evidence_text: str, paper_passages=()) -> list[str]:
+    """Deterministic rule: every number in a claim must appear in the paper, compared by value. A number counts if it
+    is in the cited passages, or in another passage about the same thing (sharing at least two content words with the
+    claim, or half of them for very short claims); a number that merely occurs somewhere in a long paper does not count. Honestly hedged rounding is
+    accepted. Returns one readable message per problem."""
+    if isinstance(paper_passages, str):
+        paper_passages = [paper_passages]
+    words = _content_words(claim)
+    need = min(2, max(1, (len(words) + 1) // 2))                                # short claims share fewer words
+    related = [t for t in paper_passages if len(words & _content_words(t)) >= need]
+    pool = [n["value"] for t in [evidence_text, *related] for n in numbers_in(t)]
+    hints = [n["value"] for t in [evidence_text, *paper_passages] for n in numbers_in(t)]
+    issues, seen = [], set()
+    for n in numbers_in(claim):
+        if n["value"] in (0, 1) and not n["percent"]:                             # 'one of the', 'zero' are not data
+            continue
+        if _matches(n, pool) or _honest_rounding(n, pool) or n["raw"].lower() in seen:
+            continue
+        seen.add(n["raw"].lower())
+        near = _closest(n["value"], pool) or _closest(n["value"], hints)
+        hint = f" (the paper says {_show(near)}{'%' if n['percent'] else ''})" if near is not None else ""
+        issues.append(f"{n['raw']}{hint}")
+    return issues
+
+
+def number_check(claim: str, evidence_text: str, paper_passages=()) -> list[str]:
+    """The numbers in a claim that the paper does not contain (raw text as written in the claim)."""
+    return [msg.split(" (the paper says")[0] for msg in number_issues(claim, evidence_text, paper_passages)]
 
 
 # ---------------------------------------------------------------- claim-type aware overclaim detection
@@ -862,13 +1017,13 @@ DISTORTION_LABELS = {
     "correlation_to_causation": "Correlation → causation",
     "subgroup_to_population": "Subgroup → whole population",
     "preliminary_to_established": "Preliminary → established",
-    "finding_to_recommendation": "Finding → recommendation",
+    "finding_to_recommendation": "Measured outcome → recommendation",
 }
 LEVEL_WORDS = {
     "none": "no causal link", "association": "an association", "causal": "cause and effect",
     "studied": "the studied group only", "general": "people in general",
     "tentative": "a preliminary result", "definitive": "an established fact",
-    "finding": "a finding", "recommendation": "a recommendation",
+    "finding": "a measured outcome", "recommendation": "a recommendation",
 }
 # What a faithful rewrite must say on a scale (used to brief the writer).
 TARGETS = {
@@ -936,6 +1091,15 @@ def cue_types(claim: str, evidence_text: str) -> list[str]:
     return out
 
 
+def main_first(confirmed: list[str], ai_main: str, ai_types: list[str]) -> list[str]:
+    """Confirmed distortion types with the main one first: the AI's main type if confirmed by the ratings,
+    else the first confirmed type in the AI's own order, else the scale order."""
+    rank = {}
+    for i, t in enumerate(([ai_main] if ai_main else []) + list(ai_types)):
+        rank.setdefault(t, i)                  # first mention wins: the AI's main choice keeps rank 0
+    return sorted(confirmed, key=lambda t: (rank.get(t, 99), DISTORTIONS.index(t)))
+
+
 def explain_levels(levels: dict, types: list[str]) -> str:
     parts = []
     for sc, (ev, cl) in levels.items():
@@ -951,7 +1115,7 @@ def _verify_chunk(llm: LLM, source: str, items: list[dict], prompt: str | None =
     return [(v, llm.last_model) for v in report.items]
 
 
-def verify(llm: LLM, passages, items: list[dict], cues: bool = True, prompt: str | None = None) -> list[dict]:
+def verify(llm: LLM, passages, items: list[dict], cues: bool = False, prompt: str | None = None) -> list[dict]:
     """Checks items in parallel groups (release / posts / video) for speed.
     The AI gives a verdict and rates evidence and claim on four scales; code compares the ratings, so a claim that is
     stronger than its evidence is always flagged with its distortion type. Wording cues can only add "needs review"."""
@@ -965,6 +1129,7 @@ def verify(llm: LLM, passages, items: list[dict], cues: bool = True, prompt: str
             verdicts.extend(part)
     by_id = {v.item_id.strip("[] "): (v, model) for v, model in verdicts}
     pmap = {p.pid: p for p in passages}
+    paper_texts = [p.text for p in passages]
     results = []
     for it in items:
         v, model = by_id.get(it["id"], (None, ""))
@@ -972,7 +1137,7 @@ def verify(llm: LLM, passages, items: list[dict], cues: bool = True, prompt: str
         if v is None:
             r.update(verdict="UNCHECKED", evidence=[], issue_type="not checked",
                      explanation="The checker returned no verdict for this item.", rewrite="", rule_flags=[], checked_by="",
-                     ai_verdict="UNCHECKED", levels={}, distortions=[], ai_types=[], cue_types=[], types=[])
+                     ai_verdict="UNCHECKED", levels={}, distortions=[], ai_types=[], ai_main="", cue_types=[], types=[])
             results.append(r)
             continue
         verdict = v.verdict.strip().upper().replace(" ", "_")
@@ -985,20 +1150,24 @@ def verify(llm: LLM, passages, items: list[dict], cues: bool = True, prompt: str
         distortions = compare_levels(levels)
         cues_found = cue_types(it["text"], ev_text) if ev and verdict != "NOT_A_CLAIM" else []
         issue, explanation, types, flags = v.issue_type, v.explanation, [], []
+        ai_types = normalise_types(v.distortion_types)
+        ai_main = (normalise_types([v.main_distortion]) or [""])[0]
         # Type layer: a claim rated stronger than its evidence is a distortion, whatever the verdict said.
+        # The main type is the AI's main choice when the ratings confirm it, otherwise the confirmed type it ranks first.
+        ordered = main_first(distortions, ai_main, ai_types)
         if distortions and verdict in {"SUPPORTED", "EXAGGERATED"}:
-            verdict, types = "EXAGGERATED", distortions
-            issue = "; ".join(DISTORTION_LABELS[t] for t in distortions)
-            explanation = explanation or explain_levels(levels, distortions)
+            verdict, types = "EXAGGERATED", ordered
+            issue = "; ".join(DISTORTION_LABELS[t] for t in ordered)
+            explanation = explanation or explain_levels(levels, ordered)
         elif verdict in WRONG:
-            types = distortions
+            types = ordered
         # Rule layer: the AI proposes, deterministic rules double-check.
         if verdict == "SUPPORTED" and not ev:
             flags.append("no valid source passage cited")
         if verdict == "SUPPORTED" and ev:
-            missing = number_check(it["text"], ev_text)
+            missing = number_issues(it["text"], ev_text, paper_texts)
             if missing:
-                flags.append("number(s) not found in cited passages: " + ", ".join(missing))
+                flags.append("number not in the paper: " + "; ".join(missing))
             if cues:
                 for t, word in cues_found:
                     flags.append(f"possible {DISTORTION_LABELS[t].lower()}: the claim says '{word}', the cited passages do not")
@@ -1008,7 +1177,7 @@ def verify(llm: LLM, passages, items: list[dict], cues: bool = True, prompt: str
         r.update(verdict=verdict, evidence=ev, issue_type=issue, explanation=explanation,
                  rewrite=v.suggested_rewrite, rule_flags=flags, checked_by=model,
                  ai_verdict=ai_verdict, levels=levels, distortions=distortions,
-                 ai_types=normalise_types(v.distortion_types), cue_types=[t for t, _ in cues_found], types=types)
+                 ai_types=ai_types, ai_main=ai_main, cue_types=[t for t, _ in cues_found], types=types)
         results.append(r)
     return results
 
@@ -1053,24 +1222,24 @@ def _rewrite_brief(r: dict, feedback: str = "") -> str:
 
 
 def strength_kept(original: dict, check: dict) -> bool | None:
-    """True if the rewrite sits exactly at the evidence's level where the original overstated it, and keeps the
-    original's level elsewhere (no needless weakening). None if the ratings are incomplete."""
-    lv, new = original.get("levels") or {}, check.get("levels") or {}
-    if not lv or not new:
+    """True if, on every scale the original overstated, the rewrite sits exactly at the evidence's level: not stronger
+    and not weaker. Both levels come from the same re-check call, so ratings are compared within one judgement.
+    None if the ratings are incomplete."""
+    new = check.get("levels") or {}
+    fixed = [sc for sc in SCALES if DISTORTION_OF[sc] in (original.get("types") or [])]
+    if not new or not fixed:
         return None
-    for sc, (ev, cl) in lv.items():
-        got = (new.get(sc) or [None, None])[1]
-        if ev is None or cl is None or got is None:
+    for sc in fixed:
+        ev, got = (new.get(sc) or [None, None])
+        if ev is None or got is None:
             return None
-        rank = SCALES[sc]
-        target = ev if DISTORTION_OF[sc] in compare_levels({sc: [ev, cl]}) else cl
-        if rank.index(got) != rank.index(target):
+        if got != ev:
             return False
     return True
 
 
 def rewrite_flagged(writer: LLM, checker: LLM, passages, results: list[dict], rounds: int = 2,
-                    cues: bool = True) -> list[dict]:
+                    cues: bool = False) -> list[dict]:
     """Faithful rewrites for flagged claims: the writer rewrites each claim to its evidence's level, the independent
     checker re-checks the rewrite, and a rejected rewrite gets one more attempt with the checker's feedback.
     Adds rewrite, rewrite_verified, rewrite_strength_kept, rewrite_rounds and rewrite_by to each fixed result."""

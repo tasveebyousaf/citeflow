@@ -16,6 +16,7 @@ Results are written to evaluation/results/<date>_<checker>.md and .json.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from collections import Counter, defaultdict
@@ -255,9 +256,12 @@ def _key(*parts):
     return hashlib.sha256("\x1f".join(map(str, parts)).encode()).hexdigest()[:24]
 
 
-def check_pair(checker, writer, pair, cues=True, prompt=None):
+def check_pair(checker, writer, pair, cues=False, prompt=None):
     """One pair through exactly the app's checking code: verify, then faithful rewrite + re-check if flagged."""
     passages = [pl.Passage(pid="P1-1", page=0, text=pair["evidence"])]
+    title = re.sub(r"\s*\(?https?://\S+\)?", "", pair.get("paper", "")).strip(" ,;")
+    if title:                                  # the app sees the whole paper; the pair gives at least its title
+        passages.insert(0, pl.Passage(pid="P0-1", page=0, text="Paper title: " + title))
     item = [{"id": "C1", "part": "Evaluation", "text": pair["claim"]}]
     t0 = time.time()
     r = pl.verify(checker, passages, item, cues=cues, prompt=prompt)[0]
@@ -266,6 +270,7 @@ def check_pair(checker, writer, pair, cues=True, prompt=None):
     return {"id": pair["id"], "paper": pair["paper"], "claim": pair["claim"], "evidence": pair["evidence"],
             "gold": pair["gold"], "verdict": r["verdict"], "ai_verdict": r.get("ai_verdict", r["verdict"]),
             "levels": r.get("levels", {}), "distortions": r.get("distortions", []), "ai_types": r.get("ai_types", []),
+            "ai_main": r.get("ai_main", ""), "types": r.get("types", []),
             "cue_types": r.get("cue_types", []), "issue_type": r.get("issue_type", ""),
             "explanation": r.get("explanation", ""), "rule_flags": r.get("rule_flags", []),
             "checked_by": r.get("checked_by", ""), "rewrite": r.get("rewrite", "") if r.get("rewrite_rounds") else "",
@@ -310,8 +315,9 @@ def decide(row, mode):
     if mode == "baseline":
         return row["verdict"] in pl.FLAGGED, []
     if mode == "ai_only":
-        return wrong, list(row["ai_types"]) if wrong else []
-    types = list(row["distortions"])
+        ai = ([row["ai_main"]] if row.get("ai_main") else []) + [t for t in row["ai_types"] if t != row.get("ai_main")]
+        return wrong, ai if wrong else []
+    types = pl.main_first(row["distortions"], row.get("ai_main", ""), row["ai_types"])
     flagged = wrong or bool(types)
     if mode == "ai_levels_cues" and not flagged and row["cue_types"]:
         return True, list(row["cue_types"])
@@ -343,9 +349,9 @@ def pair_metrics(rows, mode):
     out = {"mode": mode, "pairs": len(rows), "distorted": len(distorted), "faithful": len(faithful),
            "detection_recall": _ratio(tp, len(distorted)), "detection_precision": _ratio(tp, tp + fp),
            "false_alarm_rate": _ratio(fp, len(faithful)), "per_type": {}}
-    for t in TYPES:
+    for t in TYPES:                     # each flagged claim is counted under its main (first) type
         gold = {r["id"] for r in rows if t in r["gold"]}
-        pred = {r["id"] for r in rows if dec[r["id"]][0] and t in dec[r["id"]][1]}
+        pred = {r["id"] for r in rows if dec[r["id"]][0] and dec[r["id"]][1][:1] == [t]}
         k = len(gold & pred)
         p, rc = _ratio(k, len(pred)), _ratio(k, len(gold))
         f1 = (2 * p["value"] * rc["value"] / (p["value"] + rc["value"])
@@ -359,7 +365,7 @@ def pair_metrics(rows, mode):
     for r in rows:
         flagged, types = dec[r["id"]]
         g = r["gold"][0] if r["gold"] else "faithful"
-        pred = "not flagged" if not flagged else next((t for t in TYPES if t in types), "other")
+        pred = "not flagged" if not flagged else (types[0] if types else "other")
         matrix[g][pred] += 1
     out["confusion"] = matrix
     return out
@@ -396,12 +402,15 @@ def _spread(values):
 
 
 def stability(runs, mode):
-    """Share of pairs that got the same decision (flagged + types) in every run."""
+    """Share of pairs that got the same decision (flagged or not, and the main type) in every run."""
     if len(runs) < 2:
         return None
     ids = set.intersection(*[{r["id"] for r in rows} for rows in runs])
-    same = sum(1 for i in ids if len({json.dumps(decide(next(r for r in rows if r["id"] == i), mode), sort_keys=True)
-                                      for rows in runs}) == 1)
+    def key(row):
+        flagged, types = decide(row, mode)
+        return (flagged, types[0] if flagged and types else "")
+
+    same = sum(1 for i in ids if len({key(next(r for r in rows if r["id"] == i)) for rows in runs}) == 1)
     return same / len(ids) if ids else None
 
 
@@ -416,7 +425,7 @@ def pairs_report(data_path, data_info, results, primary="ai_levels"):
               f"{len(runs)} run(s), temperature 0, no model fallback (strict). Pairs: {len(rows)} "
               f"({sum(1 for r in rows if r['gold'])} distorted, {sum(1 for r in rows if not r['gold'])} faithful).", "",
               "### Decision rules compared (same AI output, different decision rule)", "",
-              "| Rule | Detection recall | Detection precision | False alarms | Macro F1 (4 types) | Same decision in every run |",
+              "| Rule | Detection recall | Detection precision | False alarms | Macro F1 (4 types) | Same flag and main type in every run |",
               "|---|---|---|---|---|---|"]
         for mode in MODES:
             ms = [pair_metrics(r, mode) for r in runs]
@@ -453,12 +462,13 @@ def pairs_report(data_path, data_info, results, primary="ai_levels"):
               f"Correctly flagged distorted claims rewritten by the writer model and re-checked by the checker: {rw['rewritten']}",
               f"- Passed the re-check on the first try: {_fmt(rw['verified_first_try'])}",
               f"- Passed after one retry with the checker's feedback: {_fmt(rw['verified_after_retry'])}",
-              f"- Strength and scope preserved (rewrite rated exactly at the evidence's level, not weaker): {_fmt(rw['strength_kept'])}",
+              f"- Strength preserved: on every overstated scale the verified rewrite is rated exactly at the evidence's level "
+              f"(not weaker): {_fmt(rw['strength_kept'])}",
               "", "### Cases (run 1)", ""]
         dec = {r["id"]: decide(r, primary) for r in rows}
-        miss = [r for r in rows if r["gold"] and not (dec[r["id"]][0] and set(r["gold"]) & set(dec[r["id"]][1]))]
+        miss = [r for r in rows if r["gold"] and not (dec[r["id"]][0] and dec[r["id"]][1][:1] and dec[r["id"]][1][0] in r["gold"])]
         fa = [r for r in rows if not r["gold"] and dec[r["id"]][0]]
-        good = [r for r in rows if r["gold"] and set(r["gold"]) & set(dec[r["id"]][1]) and r.get("rewrite_verified")]
+        good = [r for r in rows if r["gold"] and dec[r["id"]][1][:1] and dec[r["id"]][1][0] in r["gold"] and r.get("rewrite_verified")]
 
         def lv(r):
             return "; ".join(f"{sc}: paper {ev} / claim {cl}" for sc, (ev, cl) in r["levels"].items() if ev != cl) or "levels equal"
@@ -478,8 +488,10 @@ def pairs_report(data_path, data_info, results, primary="ai_levels"):
           "evidence; finding the evidence inside a whole paper is a separate step not measured here.",
           "- The AI rates evidence and claim on four scales (causal strength, scope, certainty, finding vs recommendation); "
           "a claim rated stronger than its evidence is flagged with that distortion type.",
-          "- Precision = flagged-as-type that truly are that type; recall = true cases of the type that were flagged as it. "
-          "A pair labelled with two types counts for both.",
+          "- Each flagged claim is counted under its main distortion type (other types it also shows are listed but not "
+          "scored). Precision = claims given type X that truly are X; recall = true X claims given type X. A pair "
+          "labelled with two types counts as correct if its main type is either.",
+          "- The checker sees the paper title and the evidence passage (the app sees the whole paper).",
           "- 95% confidence intervals: Wilson score interval. Runs repeat the same API calls to show run-to-run variation.",
           "- Strict mode: one fixed checker model, no fallback; a failed call stops the run (rerun resumes from cache)."]
     return "\n".join(L) + "\n"
@@ -535,7 +547,7 @@ def main_pairs(a, key):
             print(f"  {model} run {rep} {pid}: {err}")
         sys.exit("No report written. Run the same command again to resume where it stopped.")
     text = pairs_report(data_path, info, results)
-    text += "\n## API usage\n\n" + "\n".join(
+    text += "\n## API usage (calls made in this sitting; answers reused from the cache are not counted)\n\n" + "\n".join(
         f"- {m}: {usage[(m, 'calls')]} calls, {usage[(m, 'prompt_tokens')]:,} input tokens, {usage[(m, 'output_tokens')]:,} output tokens"
         for m in sorted({m for m, _ in usage})) + "\n"
     os.makedirs(a.out, exist_ok=True)
