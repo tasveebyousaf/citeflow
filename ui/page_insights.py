@@ -5,7 +5,7 @@ import html
 import streamlit as st
 
 import pipeline as pl
-from ui.core import allow, llm, log_error, ss
+from ui.core import ai_problem, allow, llm, log_error, ss
 from ui.i18n import tr
 from ui.project import current_content, persist
 from ui.results import BRAND
@@ -50,8 +50,9 @@ def page_insights():
                 st.rerun()
             except Exception as e:
                 log_error("publishing plan", e)
-                if any(t in str(e) for t in pl.TRANSIENT):
-                    st.warning(tr("Google's AI service is busy right now. Please try again in a minute."))
+                friendly = ai_problem(e)
+                if friendly:
+                    st.warning(friendly)
                 else:
                     st.error(tr('Something went wrong: {0}').format(e))
     plan = ss.get("plan")

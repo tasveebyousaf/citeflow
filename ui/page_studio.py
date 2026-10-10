@@ -7,7 +7,7 @@ from PIL import Image
 
 import pipeline as pl
 import store
-from ui.core import allow, is_demo, limit, llm, log_error, ss, verify_now
+from ui.core import ai_problem, allow, is_demo, limit, llm, log_error, ss, verify_now
 from ui.i18n import choose, tr
 from ui.project import make_cards, persist
 from ui.results import results_view
@@ -47,10 +47,13 @@ def page_studio():
         elif not allow("run"):
             go = False
 
+    # A fixed slot for progress and errors, present on every run: the page keeps the same layout, so new results
+    # replace the old ones in place and the page never shows two copies while work is running.
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    slot = st.empty()
     if go:
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
         try:
-            with st.status(tr("Reading the paper…"), expanded=False) as status:
+            with slot.container(), st.status(tr("Reading the paper…"), expanded=False) as status:
                 data = pdf.getvalue()
                 ss.pdf_bytes = data
                 ss.proofs = {}
@@ -81,13 +84,12 @@ def page_studio():
                 status.update(label=tr("Done"), state="complete")
         except Exception as e:
             log_error("create content", e)
-            msg = str(e)
-            if any(t in msg for t in pl.TRANSIENT):
-                st.warning(tr("Google's AI service is very busy right now. Please wait a minute and click "
-                           "**Create verified content** again."))
-            else:
-                st.error(tr('Something went wrong: {0}').format(e))
+            friendly = ai_problem(e, "click **Create verified content** again")
+            with slot.container():
+                if friendly:
+                    st.warning(friendly)
+                else:
+                    st.error(tr('Something went wrong: {0}').format(e))
 
     if "results" in ss:
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
         results_view()

@@ -54,6 +54,25 @@ def _best_passage(text, passages):
     return scored[0][0] if scored else ""
 
 
+def _levels(text):
+    """Keyword stand-in for the AI's four claim-type ratings."""
+    low = text.lower()
+    return {
+        "causal": "causal" if re.search(r"\b(lowers|reduces|causes|prevents|boosts)\b", low)
+        else "association" if re.search(r"associated|linked", low) else "none",
+        "scope": "general" if re.search(r"\b(everyone|people|humans)\b", low) else "studied",
+        "certainty": "definitive" if re.search(r"\b(proven|confirmed|definitive)\b", low) else "tentative",
+        "act": "recommendation" if re.search(r"\b(should|must)\b", low) else "finding",
+    }
+
+
+def _with_levels(v, text, passages):
+    ev = passages.get(v.evidence_ids[0], "") if v.evidence_ids else ""
+    e, c = _levels(ev), _levels(text)
+    return v.model_copy(update={**{f"evidence_{k}": e[k] for k in e}, **{f"claim_{k}": c[k] for k in c},
+                                "distortion_types": pl.compare_levels({k: [e[k], c[k]] for k in e})})
+
+
 def _verdict(text, passages):
     low = text.lower()
     if any(w in low for w in WRONG_WORDS):
@@ -78,6 +97,10 @@ class FakeLLM:
         self.log = []
         self.on_call = on_call
 
+    @property
+    def last_model(self):
+        return self.model
+
     def json_call(self, prompt, schema, temperature=0.2, fast=True):
         FakeLLM.calls.append((schema.__name__, self.model))
         ok = FakeLLM.fail_next <= 0
@@ -101,9 +124,14 @@ class FakeLLM:
             ps = _passages(prompt)
             out = []
             for iid, text in _items(prompt):
-                v = _verdict(text, ps)
+                v = _with_levels(_verdict(text, ps), text, ps)
                 out.append(v.model_copy(update={"item_id": iid}))
             return pl.Report(items=out)
+        if schema is pl.Rewrites:            # rewrite = the evidence sentence, which sits exactly at the evidence's level
+            out = []
+            for iid, ev in re.findall(r"^\[([A-Z]\d+)\] ORIGINAL: .*\nEVIDENCE: (.*)$", prompt, re.M):
+                out.append(pl.RewriteItem(item_id=iid, text=ev.strip()))
+            return pl.Rewrites(items=out)
         if schema is pl.Hyped:
             return pl.Hyped(press_release=HYPE)
         if schema is pl.PublishPlan:
@@ -118,5 +146,7 @@ class FakeLLM:
         raise AssertionError(f"FakeLLM: unexpected schema {schema}")
 
 
+REAL_LLM = pl.LLM                         # kept for tests of the real retry logic
 pl.LLM = FakeLLM
+REAL_LIST_MODELS = pl.list_flash_models
 pl.list_flash_models = lambda key: ["fake-model", "fake-model-2"]
